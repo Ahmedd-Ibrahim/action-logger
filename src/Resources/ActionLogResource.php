@@ -5,9 +5,10 @@ namespace BIM\ActionLogger\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Collection;
 use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Facades\Lang;
-use BIM\ActionLogger\Processors\ActionProcessorFactory;
+use BIM\ActionLogger\Processors\ProcessorFactory;
 
 class ActionLogResource extends JsonResource
 {
@@ -16,31 +17,11 @@ class ActionLogResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        /** @var Activity $activity */
-        $activity = $this->resource;
+        /** @var Collection $activities */
+        $activities = $this->resource;
 
-        $processor = ActionProcessorFactory::make($activity);
+        $processor = app(ProcessorFactory::class)->getProcessor($activities);
         return $processor->process();
-    }
-
-    /**
-     * Get the translated description for the activity.
-     */
-    protected function getTranslatedDescription(Activity $activity): string
-    {
-        $properties = $activity->properties;
-        $description = $activity->description;
-
-        // If the description is already a translation key
-        if (Lang::has('action-logger::messages.'.$description)) {
-            return Lang::get('action-logger::messages.'.$description, [
-                'model' => Lang::get('action-logger::models.'.strtolower(class_basename($activity->subject))),
-                'user' => $activity->causer->name,
-                ...$properties,
-            ]);
-        }
-
-        return $description;
     }
 
     /**

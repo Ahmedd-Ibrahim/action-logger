@@ -15,7 +15,7 @@ class ProcessorFactory
     /**
      * Get the appropriate processor for the given activities
      */
-    public function getProcessor(Collection $activities): ActionProcessor
+    public function getProcessor(Collection $activities): BaseActionProcessor
     {
         $mainActivity = $activities->first();
         
@@ -31,7 +31,7 @@ class ProcessorFactory
     /**
      * Create a processor instance
      */
-    protected function createProcessor(string $actionType, Collection $activities): ActionProcessor
+    protected function createProcessor(string $actionType, Collection $activities): BaseActionProcessor
     {
         // Check cache first
         if (isset($this->processorCache[$actionType])) {

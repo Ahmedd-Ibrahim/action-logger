@@ -6,10 +6,16 @@ use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Lang;
 
-abstract class ActionProcessor
+abstract class BaseActionProcessor
 {
+    /**
+     * The activities collection
+     */
     protected Collection $activities;
 
+    /**
+     * Create a new processor instance
+     */
     public function __construct(Collection $activities)
     {
         $this->activities = $activities;

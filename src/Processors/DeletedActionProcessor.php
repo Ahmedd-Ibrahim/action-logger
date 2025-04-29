@@ -63,11 +63,17 @@ class DeletedActionProcessor extends BatchActionProcessor
             'total_deleted' => count($entities),
             'deleted_types' => [],
             'deleted_ids' => [],
+            'deleted_data' => [],
         ];
         
         foreach ($entities as $entity) {
             $metadata['deleted_types'][] = $entity['type'];
             $metadata['deleted_ids'][] = $entity['id'];
+            $metadata['deleted_data'][] = [
+                'type' => $entity['type'],
+                'id' => $entity['id'],
+                'data' => $entity['data'],
+            ];
         }
         
         $metadata['deleted_types'] = array_unique($metadata['deleted_types']);

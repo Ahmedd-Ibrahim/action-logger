@@ -6,7 +6,7 @@ use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Lang;
 
-class BatchActionProcessor extends ActionProcessor
+class BatchActionProcessor extends BaseActionProcessor
 {
     /**
      * The translation key prefix for attributes
@@ -50,11 +50,11 @@ class BatchActionProcessor extends ActionProcessor
             $changes = $this->extractAllChanges($processedActivities);
             $entities = $this->extractEntities($processedActivities);
             
-            // Construct the message from changes and entities
-            $message = $this->constructMessage($changes, $entities);
-            
-            // Resolve action type from the main activity
+            // Get the action type from the main activity
             $actionType = $this->resolveActionType($mainActivity);
+            
+            // Get the message from translation
+            $message = $this->getTranslatedMessage($actionType, $entities, $changes);
             
             $processedBatches[] = [
                 'message' => $message,
@@ -68,6 +68,41 @@ class BatchActionProcessor extends ActionProcessor
             'batches' => $processedBatches,
             'total_batches' => count($processedBatches),
         ];
+    }
+
+    /**
+     * Get the translated message for the action
+     */
+    protected function getTranslatedMessage(string $actionType, array $entities, array $changes): string
+    {
+        // Get the main entity (usually the first one)
+        $mainEntity = $entities[0] ?? null;
+        if (!$mainEntity) {
+            return 'No changes recorded';
+        }
+
+        $entityName = Lang::get('action-logger::models.'.strtolower(class_basename($mainEntity['type'])));
+        $entityId = $mainEntity['data']['id'] ?? null;
+        $entityIdentifier = $entityId ? "#{$entityId}" : '';
+
+        // Get the translation key for the action
+        $translationKey = "action-logger::messages.{$actionType}";
+        
+        // Prepare translation parameters
+        $parameters = [
+            'model' => $entityName . $entityIdentifier,
+            'user' => $mainEntity['data']['causer']['name'] ?? 'Unknown',
+        ];
+
+        // Add changes to parameters if needed
+        foreach ($changes as $change) {
+            foreach ($change['changes'] as $key => $value) {
+                $parameters[$key] = $value['to'];
+            }
+        }
+
+        // Get the translated message
+        return Lang::get($translationKey, $parameters);
     }
 
     /**
@@ -211,52 +246,6 @@ class BatchActionProcessor extends ActionProcessor
         }
         
         return $entities;
-    }
-    
-    /**
-     * Construct a message from changes and entities
-     */
-    protected function constructMessage(array $changes, array $entities): string
-    {
-        if (empty($changes) && empty($entities)) {
-            return 'No changes recorded';
-        }
-
-        $messageParts = [];
-        
-        // Get the main entity (usually the first one)
-        $mainEntity = $entities[0] ?? null;
-        if ($mainEntity) {
-            $entityName = Lang::get('action-logger::models.'.strtolower(class_basename($mainEntity['type'])));
-            $messageParts[] = $entityName;
-            
-            // Add entity identifier if available
-            if (isset($mainEntity['data']['id'])) {
-                $messageParts[] = '#'.$mainEntity['data']['id'];
-            }
-        }
-        
-        // Add status changes
-        foreach ($changes as $change) {
-            if (isset($change['changes']['status'])) {
-                $statusChange = $change['changes']['status'];
-                $messageParts[] = 'has been';
-                $messageParts[] = $statusChange['to'];
-            }
-        }
-        
-        // Add additional changes
-        foreach ($changes as $change) {
-            foreach ($change['changes'] as $key => $value) {
-                if ($key !== 'status') {
-                    $messageParts[] = 'with';
-                    $messageParts[] = $value['label'];
-                    $messageParts[] = $value['to'];
-                }
-            }
-        }
-        
-        return implode(' ', $messageParts);
     }
 
     /**

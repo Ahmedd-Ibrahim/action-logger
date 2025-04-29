@@ -89,12 +89,18 @@ class UpdatedActionProcessor extends BatchActionProcessor
             'total_changes' => 0,
             'changed_fields' => [],
             'status_changed' => false,
+            'changed_values' => [],
         ];
         
         foreach ($changes as $change) {
             foreach ($change['changes'] as $key => $value) {
                 $stats['total_changes']++;
                 $stats['changed_fields'][] = $key;
+                $stats['changed_values'][$key] = [
+                    'from' => $value['from'],
+                    'to' => $value['to'],
+                    'label' => $value['label'],
+                ];
                 
                 if ($key === 'status') {
                     $stats['status_changed'] = true;
