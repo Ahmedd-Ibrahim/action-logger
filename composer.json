@@ -1,0 +1,56 @@
+{
+    "name": "bim/action-logger",
+    "description": "A Laravel package for managing action logging with support for CRUD operations, custom actions, and translations.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "BIM",
+            "email": "info@bim.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0",
+        "spatie/laravel-activitylog": "^4.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0",
+        "phpunit/phpunit": "^10.0",
+        "mockery/mockery": "^1.5",
+        "fakerphp/faker": "^1.20"
+    },
+    "autoload": {
+        "psr-4": {
+            "BIM\\ActionLogger\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/",
+            "Tests\\Database\\Factories\\": "tests/Database/Factories/",
+            "Tests\\Models\\": "tests/Models/",
+            "Tests\\Enums\\": "tests/Enums/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "BIM\\ActionLogger\\ActionLoggerServiceProvider"
+            ],
+            "aliases": {
+                "ActionLogger": "BIM\\ActionLogger\\Facades\\ActionLogger",
+                "LogBatch": "BIM\\ActionLogger\\Facades\\LogBatch"
+            }
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "test-coverage": "vendor/bin/phpunit --coverage-html coverage"
+    }
+} 
