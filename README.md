@@ -277,27 +277,45 @@ Example response from `process()`:
 
 ```php
 [
-    'type' => 'user_action',
-    'user' => [
+    'batch_uuid' => '123e4567-e89b-12d3-a456-426614174000',
+    'message' => 'John Doe updated 2 entities',
+    'causer' => [
         'id' => 1,
         'name' => 'John Doe',
     ],
+    'causer_type' => 'App\\Models\\User',
+    'causer_id' => 1,
     'action' => 'updated',
-    'subject_type' => 'User',
-    'subject_id' => 1,
-    'description' => 'User updated their profile',
-    'changes' => [
-        'name' => [
-            'old' => 'John',
-            'new' => 'John Doe',
+    'entities' => [
+        [
+            'type' => 'User',
+            'id' => 1,
+            'changes' => [
+                [
+                    'attribute' => 'Name',
+                    'old' => 'John',
+                    'new' => 'John Doe',
+                ],
+                [
+                    'attribute' => 'Email',
+                    'old' => 'john@example.com',
+                    'new' => 'johndoe@example.com',
+                ],
+            ],
         ],
-        'email' => [
-            'old' => 'john@example.com',
-            'new' => 'johndoe@example.com',
+        [
+            'type' => 'Profile',
+            'id' => 1,
+            'changes' => [
+                [
+                    'attribute' => 'Phone',
+                    'old' => null,
+                    'new' => '+1234567890',
+                ],
+            ],
         ],
     ],
-    'timestamp' => '2023-05-15 14:30:45',
-    'processor' => 'App\\Processors\\UserActionProcessor',
+    'created_at' => '2023-05-15 14:30:45',
 ]
 ```
 
@@ -313,35 +331,51 @@ Example batch response:
 
 ```php
 [
-    'uuid' => '123e4567-e89b-12d3-a456-426614174000',
-    'type' => 'user_profile_update',
-    'user' => [
+    'batch_uuid' => '123e4567-e89b-12d3-a456-426614174000',
+    'message' => 'John Doe modified 3 entities',
+    'causer' => [
         'id' => 1,
         'name' => 'John Doe',
     ],
-    'count' => 3,
-    'actions' => ['updated', 'created'],
-    'subjects' => [
-        'User' => [1],
-        'Profile' => [1],
+    'causer_type' => 'App\\Models\\User',
+    'causer_id' => 1,
+    'action' => 'modified',
+    'entities' => [
+        [
+            'type' => 'User',
+            'id' => 1,
+            'changes' => [
+                [
+                    'attribute' => 'Name',
+                    'old' => 'John',
+                    'new' => 'John Doe',
+                ],
+            ],
+        ],
+        [
+            'type' => 'Profile',
+            'id' => 1,
+            'changes' => [
+                [
+                    'attribute' => 'Phone',
+                    'old' => null,
+                    'new' => '+1234567890',
+                ],
+            ],
+        ],
+        [
+            'type' => 'Brief',
+            'id' => 1,
+            'changes' => [
+                [
+                    'attribute' => 'Brief Type',
+                    'old' => 'final_brief',
+                    'new' => 'first_brief',
+                ],
+            ],
+        ],
     ],
-    'description' => 'John Doe updated their profile and added contact information',
-    'changes' => [
-        'name' => [
-            'old' => 'John',
-            'new' => 'John Doe',
-        ],
-        'email' => [
-            'old' => 'john@example.com',
-            'new' => 'johndoe@example.com',
-        ],
-        'phone' => [
-            'old' => null,
-            'new' => '+1234567890',
-        ],
-    ],
-    'timestamp' => '2023-05-15 14:30:45',
-    'processor' => 'App\\Processors\\UserProfileUpdateProcessor',
+    'created_at' => '2023-05-15 14:30:45',
 ]
 ```
 

@@ -100,41 +100,43 @@ class BatchActionProcessor extends BaseActionProcessor implements ActionProcesso
         $entitiesWithChanges = $this->extractEntitiesWithChanges($batchActivities);
         $entityCount = count($entitiesWithChanges);
         
-        // Generate messages
+        // Generate message
         $shortMessage = Lang::get('activities.batch_message', [
             'causer' => $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System',
             'action' => $commonAction,
             'count' => $entityCount,
         ]);
         
-        $detailedMessage = sprintf(
-            '%s %s %d %s',
-            $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System', 
-            $commonAction, 
-            $entityCount,
-            $entityCount === 1 ? 'entity' : 'entities'
-        );
-        
-        // Build concise entity information
+        // Build simplified entity information
         $entities = [];
         foreach ($entitiesWithChanges as $entity) {
+            // Skip entities without changes unless they were created
+            if (empty($entity['changes']) && $commonAction !== 'created') {
+                continue;
+            }
+            
+            // Get translated model name
+            $modelType = $entity['type'];
+            $modelBaseName = class_basename($modelType);
+            $modelKey = $this->translateModelKey($modelType);
+            $translatedModelName = Lang::has("activities.models.{$modelKey}") 
+                ? Lang::get("activities.models.{$modelKey}") 
+                : $modelBaseName;
+                
             $entities[] = [
-                'type' => $entity['type'],
+                'type' => $translatedModelName,
                 'id' => $entity['id'],
-                'changes' => $entity['changes'] ?? [],
-                'formatted_changes' => $entity['formatted_changes'] ?? []
+                'changes' => $this->simplifyChanges($entity['formatted_changes'] ?? [])
             ];
         }
         
         return [
             'batch_uuid' => $batchUuid,
             'message' => $shortMessage,
-            'detailed_message' => $detailedMessage,
             'causer' => $primaryActivity->causer,
             'causer_type' => $primaryActivity->causer_type,
             'causer_id' => $primaryActivity->causer_id,
             'action' => $commonAction,
-            'subject_type' => null,
             'entities' => $entities,
             'created_at' => $primaryActivity->created_at
         ];
