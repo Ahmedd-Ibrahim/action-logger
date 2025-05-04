@@ -110,11 +110,7 @@ class BatchActionProcessor extends BaseActionProcessor implements ActionProcesso
         // Build simplified entity information
         $entities = [];
         foreach ($entitiesWithChanges as $entity) {
-            // Skip entities without changes unless they were created
-            if (empty($entity['changes']) && $commonAction !== 'created') {
-                continue;
-            }
-            
+            // Include all entities regardless of changes
             // Get translated model name
             $modelType = $entity['type'];
             $modelBaseName = class_basename($modelType);

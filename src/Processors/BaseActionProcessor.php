@@ -120,7 +120,10 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
         }
         
         if ($batchActivities->isEmpty()) {
-            return [];
+            return [
+                'error' => 'No activities found for batch',
+                'batch_uuid' => $batchUuid
+            ];
         }
         
         // Get the primary activity and common data
@@ -131,6 +134,21 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
         $entitiesWithChanges = $this->extractEntitiesWithChanges($batchActivities);
         $entityCount = count($entitiesWithChanges);
         
+        if (empty($entitiesWithChanges)) {
+            return [
+                'error' => 'No entities extracted from activities',
+                'batch_uuid' => $batchUuid,
+                'activity_count' => $batchActivities->count(),
+                'sample_activity' => [
+                    'id' => $primaryActivity->id,
+                    'subject_type' => $primaryActivity->subject_type,
+                    'subject_id' => $primaryActivity->subject_id,
+                    'event' => $primaryActivity->event,
+                    'properties' => $primaryActivity->properties,
+                ]
+            ];
+        }
+        
         // Generate message
         $shortMessage = Lang::get('activities.batch_message', [
             'causer' => $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System',
@@ -138,14 +156,10 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             'count' => $entityCount,
         ]);
         
-        // Build simplified entity information (only include entities with changes)
+        // Build simplified entity information
         $entities = [];
         foreach ($entitiesWithChanges as $entity) {
-            // Skip entities without changes unless they were created
-            if (empty($entity['changes']) && $commonAction !== 'created') {
-                continue;
-            }
-            
+            // Remove filtering logic - include all entities
             // Get translated model name
             $modelType = $entity['type'];
             $modelBaseName = class_basename($modelType);
@@ -153,11 +167,21 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             $translatedModelName = Lang::has("activities.models.{$modelKey}") 
                 ? Lang::get("activities.models.{$modelKey}") 
                 : $modelBaseName;
-                
+            
             $entities[] = [
                 'type' => $translatedModelName,
                 'id' => $entity['id'],
                 'changes' => $this->simplifyChanges($entity['formatted_changes'] ?? [])
+            ];
+        }
+        
+        // If no entities after processing, add debug info
+        if (empty($entities)) {
+            return [
+                'error' => 'No entities after processing',
+                'batch_uuid' => $batchUuid,
+                'raw_entities_count' => count($entitiesWithChanges),
+                'sample_raw_entity' => !empty($entitiesWithChanges) ? reset($entitiesWithChanges) : null
             ];
         }
         
@@ -181,14 +205,46 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
         $simplified = [];
         
         foreach ($formattedChanges as $change) {
-            $simplified[] = [
-                'attribute' => $change['label'],
-                'old' => $change['old_value'],
-                'new' => $change['new_value']
-            ];
+            // Handle both array formats
+            if (isset($change['label'])) {
+                // New format with attribute, label, old_value, new_value
+                $simplified[] = [
+                    'attribute' => $change['label'],
+                    'old' => $change['old_value'],
+                    'new' => $change['new_value']
+                ];
+            } elseif (is_array($change) && isset($change['attribute'])) {
+                // Already in the correct format
+                $simplified[] = [
+                    'attribute' => $change['attribute'],
+                    'old' => $change['old'],
+                    'new' => $change['new']
+                ];
+            } elseif (is_string($change) && isset($formattedChanges[$change]) && is_array($formattedChanges[$change])) {
+                // Old format with key => {old, new}
+                $simplified[] = [
+                    'attribute' => $this->getAttributeLabel($change),
+                    'old' => $formattedChanges[$change]['old'] ?? null,
+                    'new' => $formattedChanges[$change]['new'] ?? null
+                ];
+            }
         }
         
         return $simplified;
+    }
+    
+    /**
+     * Get a translated attribute label
+     */
+    protected function getAttributeLabel(string $key): string
+    {
+        // Try to get from Laravel's validation attributes
+        if (Lang::has("validation.attributes.{$key}")) {
+            return Lang::get("validation.attributes.{$key}");
+        }
+        
+        // Convert snake_case to Title Case as fallback
+        return ucfirst(str_replace('_', ' ', $key));
     }
     
     /**
@@ -423,14 +479,6 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             }
 
             $entityKey = $activity->subject_type . '_' . $activity->subject_id;
-            $eventKey = $entityKey . '_' . $activity->event;
-            
-            // Only process each entity+event once (take the latest one)
-            if (isset($processedEvents[$eventKey])) {
-                continue;
-            }
-            
-            $processedEvents[$eventKey] = true;
             
             // Initialize entity if not exists
             if (!isset($entities[$entityKey])) {
@@ -442,41 +490,49 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                 ];
             }
             
-            // Extract changes from properties
-            if (isset($activity->properties['attributes'], $activity->properties['old'])) {
-                $attributes = $activity->properties['attributes'];
-                $oldAttributes = $activity->properties['old'];
+            // Track each entity's changes by event
+            $eventKey = $entityKey . '_' . $activity->event;
+            if (!isset($processedEvents[$eventKey])) {
+                $processedEvents[$eventKey] = true;
                 
-                foreach ($attributes as $key => $newValue) {
-                    $oldValue = $oldAttributes[$key] ?? null;
+                // Extract changes from properties
+                if (isset($activity->properties['attributes'], $activity->properties['old'])) {
+                    $attributes = $activity->properties['attributes'];
+                    $oldAttributes = $activity->properties['old'];
                     
-                    // Only include if there's a change
-                    if ($oldValue !== $newValue) {
-                        // Get translation key for the attribute
-                        $modelType = $activity->subject_type;
-                        $modelBaseName = class_basename($modelType);
-                        $modelKey = $this->translateModelKey($modelType);
+                    foreach ($attributes as $key => $newValue) {
+                        $oldValue = $oldAttributes[$key] ?? null;
                         
-                        // Try to get translated attribute label
-                        $attributeLabel = $key;
-                        if (Lang::has("activities.attributes.{$modelKey}.{$key}")) {
-                            $attributeLabel = Lang::get("activities.attributes.{$modelKey}.{$key}");
-                        } elseif (Lang::has("validation.attributes.{$key}")) {
-                            $attributeLabel = Lang::get("validation.attributes.{$key}");
+                        // Only include if there's a change
+                        if ($oldValue !== $newValue) {
+                            // Get translation key for the attribute
+                            $modelType = $activity->subject_type;
+                            $modelBaseName = class_basename($modelType);
+                            $modelKey = $this->translateModelKey($modelType);
+                            
+                            // Try to get translated attribute label
+                            $attributeLabel = $key;
+                            if (Lang::has("activities.attributes.{$modelKey}.{$key}")) {
+                                $attributeLabel = Lang::get("activities.attributes.{$modelKey}.{$key}");
+                            } elseif (Lang::has("validation.attributes.{$key}")) {
+                                $attributeLabel = Lang::get("validation.attributes.{$key}");
+                            }
+                            
+                            // Format the change
+                            $entities[$entityKey]['formatted_changes'][] = [
+                                'attribute' => $key,
+                                'label' => $attributeLabel,
+                                'old_value' => $this->formatAttributeValue($oldValue),
+                                'new_value' => $this->formatAttributeValue($newValue)
+                            ];
                         }
-                        
-                        // Format the change
-                        $entities[$entityKey]['formatted_changes'][] = [
-                            'attribute' => $key,
-                            'label' => $attributeLabel,
-                            'old_value' => $this->formatAttributeValue($oldValue),
-                            'new_value' => $this->formatAttributeValue($newValue)
-                        ];
                     }
                 }
             }
         }
         
+        // Ensure we return all entities, even if they don't have changes
+        // This is important for 'created' events where there might not be changes
         return array_values($entities);
     }
     
