@@ -60,4 +60,18 @@ return [
     'batch' => [
         'delete_discarded' => false,
     ],
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Excluded Routes
+    |--------------------------------------------------------------------------
+    |
+    | Routes that should be excluded from automatic batch logging.
+    |
+    */
+    'excluded_routes' => [
+        'horizon*',
+        'telescope*',
+        'debugbar*',
+    ],
 ]; 

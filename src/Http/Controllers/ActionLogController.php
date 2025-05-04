@@ -5,7 +5,6 @@ namespace BIM\ActionLogger\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use BIM\ActionLogger\Services\ActionLoggerService;
-use BIM\ActionLogger\Resources\ActionLogResource;
 use Spatie\Activitylog\Models\Activity;
 
 class ActionLogController

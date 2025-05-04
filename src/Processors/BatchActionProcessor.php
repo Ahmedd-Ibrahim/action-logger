@@ -83,7 +83,61 @@ class BatchActionProcessor extends BaseActionProcessor implements ActionProcesso
      */
     protected function processBatchGroup(?string $batchUuid = null): array
     {
-        return parent::processBatch($batchUuid);
+        // Get activities for this batch
+        $batchActivities = $batchUuid
+            ? $this->getActivities()->where('batch_uuid', $batchUuid)
+            : $this->getActivities();
+            
+        if ($batchActivities->isEmpty()) {
+            return [];
+        }
+        
+        // Get the primary activity and common data
+        $primaryActivity = $batchActivities->first();
+        $commonAction = $this->getCommonAction($batchActivities);
+        
+        // Extract entities with their changes
+        $entitiesWithChanges = $this->extractEntitiesWithChanges($batchActivities);
+        $entityCount = count($entitiesWithChanges);
+        
+        // Generate messages
+        $shortMessage = Lang::get('activities.batch_message', [
+            'causer' => $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System',
+            'action' => $commonAction,
+            'count' => $entityCount,
+        ]);
+        
+        $detailedMessage = sprintf(
+            '%s %s %d %s',
+            $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System', 
+            $commonAction, 
+            $entityCount,
+            $entityCount === 1 ? 'entity' : 'entities'
+        );
+        
+        // Build concise entity information
+        $entities = [];
+        foreach ($entitiesWithChanges as $entity) {
+            $entities[] = [
+                'type' => $entity['type'],
+                'id' => $entity['id'],
+                'changes' => $entity['changes'] ?? [],
+                'formatted_changes' => $entity['formatted_changes'] ?? []
+            ];
+        }
+        
+        return [
+            'batch_uuid' => $batchUuid,
+            'message' => $shortMessage,
+            'detailed_message' => $detailedMessage,
+            'causer' => $primaryActivity->causer,
+            'causer_type' => $primaryActivity->causer_type,
+            'causer_id' => $primaryActivity->causer_id,
+            'action' => $commonAction,
+            'subject_type' => null,
+            'entities' => $entities,
+            'created_at' => $primaryActivity->created_at
+        ];
     }
 
     /**

@@ -122,39 +122,51 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             return [];
         }
         
-        $batchData = $this->processBatchActivities($batchActivities);
-        $message = $this->formatBatchMessage($batchData);
-        
-        // Get the primary activity (usually the first one)
+        // Get the primary activity and common data
         $primaryActivity = $batchActivities->first();
-        
-        // Get common data
-        $commonModelType = $this->getCommonModelType($batchActivities);
         $commonAction = $this->getCommonAction($batchActivities);
         
         // Extract entities with their changes
         $entitiesWithChanges = $this->extractEntitiesWithChanges($batchActivities);
+        $entityCount = count($entitiesWithChanges);
         
-        // Generate a detailed message based on entities
-        $detailedMessage = $this->generateBatchMessage(
-            $primaryActivity,
-            $commonModelType,
-            $commonAction,
-            $entitiesWithChanges
+        // Generate messages
+        $shortMessage = Lang::get('activities.batch_message', [
+            'causer' => $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System',
+            'action' => $commonAction,
+            'count' => $entityCount,
+        ]);
+        
+        $detailedMessage = sprintf(
+            '%s %s %d %s',
+            $primaryActivity->causer ? $this->getCauserName($primaryActivity->causer) : 'System', 
+            $commonAction, 
+            $entityCount,
+            $entityCount === 1 ? 'entity' : 'entities'
         );
+        
+        // Build concise entity information
+        $entities = [];
+        foreach ($entitiesWithChanges as $entity) {
+            $entities[] = [
+                'type' => $entity['type'],
+                'id' => $entity['id'],
+                'changes' => $entity['changes'] ?? [],
+                'formatted_changes' => $entity['formatted_changes'] ?? []
+            ];
+        }
         
         return [
             'batch_uuid' => $batchUuid,
-            'message' => $message,
+            'message' => $shortMessage,
             'detailed_message' => $detailedMessage,
             'causer' => $primaryActivity->causer,
             'causer_type' => $primaryActivity->causer_type,
             'causer_id' => $primaryActivity->causer_id,
             'action' => $commonAction,
-            'subject_type' => $commonModelType,
-            'entities' => $entitiesWithChanges,
+            'subject_type' => null,
+            'entities' => $entities,
             'created_at' => $primaryActivity->created_at,
-            'activities' => $batchData,
         ];
     }
     
@@ -374,60 +386,80 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
     protected function extractEntitiesWithChanges(Collection $activities): array
     {
         $entities = [];
-        $modelInstances = [];
+        $processedEvents = [];
         
+        // First pass: collect all entities and their latest activity
         foreach ($activities as $activity) {
             if (!isset($activity->subject_type, $activity->subject_id)) {
                 continue;
             }
 
             $entityKey = $activity->subject_type . '_' . $activity->subject_id;
+            $eventKey = $entityKey . '_' . $activity->event;
             
+            // Only process each entity+event once (take the latest one)
+            if (isset($processedEvents[$eventKey])) {
+                continue;
+            }
+            
+            $processedEvents[$eventKey] = true;
+            
+            // Initialize entity if not exists
             if (!isset($entities[$entityKey])) {
-                // Create a model instance to handle casts
-                if (!isset($modelInstances[$activity->subject_type])) {
-                    $modelInstances[$activity->subject_type] = $this->createModelInstance($activity->subject_type);
-                }
-                
-                $modelInstance = $modelInstances[$activity->subject_type];
-                
-                if ($modelInstance) {
-                    $entities[$entityKey] = [
-                        'type' => $activity->subject_type,
-                        'id' => $activity->subject_id,
-                        'model' => $modelInstance,
-                        'changes' => [],
-                    ];
-                }
+                $entities[$entityKey] = [
+                    'type' => $activity->subject_type,
+                    'id' => $activity->subject_id,
+                    'changes' => [],
+                    'formatted_changes' => []
+                ];
             }
             
-            // Extract changes
-            if (isset($entities[$entityKey]) && 
-                isset($activity->properties['attributes'], $activity->properties['old'])) {
-                $model = $entities[$entityKey]['model'];
-                $changes = $this->extractChanges(
-                    $model,
-                    $activity->properties['attributes'],
-                    $activity->properties['old']
-                );
+            // Extract changes from properties
+            if (isset($activity->properties['attributes'], $activity->properties['old'])) {
+                $changes = [];
                 
-                if (!empty($changes)) {
-                    $entities[$entityKey]['changes'] = array_merge(
-                        $entities[$entityKey]['changes'] ?? [],
-                        $changes
-                    );
+                foreach ($activity->properties['attributes'] as $key => $newValue) {
+                    $oldValue = $activity->properties['old'][$key] ?? null;
+                    
+                    if ($oldValue !== $newValue) {
+                        $changes[$key] = [
+                            'key' => $key,
+                            'old' => $oldValue,
+                            'new' => $newValue,
+                            'raw_old' => $oldValue,
+                            'raw_new' => $newValue,
+                        ];
+                        
+                        // Add formatted changes directly from activity if available
+                        if (isset($activity->formatted_changes[$key])) {
+                            $entities[$entityKey]['formatted_changes'][] = [
+                                'attribute' => $key,
+                                'label' => $activity->formatted_changes[$key]['label'] ?? $key,
+                                'old_value' => $activity->formatted_changes[$key]['old'] ?? $oldValue,
+                                'new_value' => $activity->formatted_changes[$key]['new'] ?? $newValue,
+                                'raw_old' => $oldValue,
+                                'raw_new' => $newValue
+                            ];
+                        } else {
+                            // Basic formatting without model instance
+                            $entities[$entityKey]['formatted_changes'][] = [
+                                'attribute' => $key,
+                                'label' => $this->translateAttribute($key, $activity->subject_type),
+                                'old_value' => $oldValue,
+                                'new_value' => $newValue,
+                                'raw_old' => $oldValue,
+                                'raw_new' => $newValue
+                            ];
+                        }
+                    }
                 }
+                
+                // Store changes
+                $entities[$entityKey]['changes'] = array_merge(
+                    $entities[$entityKey]['changes'],
+                    $changes
+                );
             }
-        }
-        
-        // Format all changes
-        foreach ($entities as &$entity) {
-            $entity['formatted_changes'] = $this->formatChangesWithTranslations(
-                $entity['type'],
-                $entity['model'],
-                $entity['changes']
-            );
-            unset($entity['model']); // Remove model instance from result
         }
         
         return array_values($entities);

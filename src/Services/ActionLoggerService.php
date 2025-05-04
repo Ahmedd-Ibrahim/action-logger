@@ -221,15 +221,23 @@ class ActionLoggerService
     }
 
     /**
-     * Process activities in a specific batch
-     * 
-     * @param Collection|Activity $activities Activities to process
-     * @param string|null $batchUuid The batch UUID to process (null for all)
+     * Process activities in a batch
+     *
+     * @param Collection|Activity $activities The activities to process
+     * @param string|null $batchUuid Batch UUID
      * @return array Processed batch data
      */
     public function processBatch(Collection|Activity $activities, ?string $batchUuid = null): array
     {
-        $processor = $this->getProcessor($activities);
+        // Convert single activity to collection
+        if ($activities instanceof Activity) {
+            $activities = collect([$activities]);
+        }
+        
+        // Get the processor for these activities
+        $processor = $this->processorFactory->getProcessor($activities);
+        
+        // Process the batch
         return $processor->processBatch($batchUuid);
     }
 
