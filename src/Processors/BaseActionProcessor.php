@@ -171,6 +171,7 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             $entities[] = [
                 'type' => $translatedModelName,
                 'id' => $entity['id'],
+                'action' => $entity['event'],
                 'changes' => $this->simplifyChanges($entity['formatted_changes'] ?? [])
             ];
         }
@@ -486,8 +487,19 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                     'type' => $activity->subject_type,
                     'id' => $activity->subject_id,
                     'changes' => [],
-                    'formatted_changes' => []
+                    'formatted_changes' => [],
+                    'event' => $activity->event,
+                    'action' => $activity->event
                 ];
+            }
+            
+            // For priority of actions, prefer these in order: created, deleted, column_updated, updated
+            if ($activity->event === 'created' || 
+                ($activity->event === 'deleted' && $entities[$entityKey]['event'] !== 'created') ||
+                ($activity->event === 'column_updated' && !in_array($entities[$entityKey]['event'], ['created', 'deleted'])) ||
+                ($activity->event === 'updated' && !in_array($entities[$entityKey]['event'], ['created', 'deleted', 'column_updated']))) {
+                $entities[$entityKey]['event'] = $activity->event;
+                $entities[$entityKey]['action'] = $activity->event;
             }
             
             // Track each entity's changes by event
@@ -503,8 +515,10 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                     foreach ($attributes as $key => $newValue) {
                         $oldValue = $oldAttributes[$key] ?? null;
                         
-                        // Only include if there's a change
-                        if ($oldValue !== $newValue) {
+                        // For created events, all attributes should be considered changes
+                        $shouldInclude = $activity->event === 'created' || $oldValue !== $newValue;
+                        
+                        if ($shouldInclude) {
                             // Get translation key for the attribute
                             $modelType = $activity->subject_type;
                             $modelBaseName = class_basename($modelType);
@@ -531,8 +545,7 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             }
         }
         
-        // Ensure we return all entities, even if they don't have changes
-        // This is important for 'created' events where there might not be changes
+        // Return all entities, including those without changes
         return array_values($entities);
     }
     

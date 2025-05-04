@@ -110,7 +110,7 @@ class BatchActionProcessor extends BaseActionProcessor implements ActionProcesso
         // Build simplified entity information
         $entities = [];
         foreach ($entitiesWithChanges as $entity) {
-            // Include all entities regardless of changes
+            // Include all entities regardless of action or changes
             // Get translated model name
             $modelType = $entity['type'];
             $modelBaseName = class_basename($modelType);
@@ -135,7 +135,8 @@ class BatchActionProcessor extends BaseActionProcessor implements ActionProcesso
             'causer_id' => $primaryActivity->causer_id,
             'action' => $commonAction,
             'entities' => $entities,
-            'created_at' => $primaryActivity->created_at
+            'created_at' => $primaryActivity->created_at,
+            'entity_count' => $entityCount
         ];
     }
 
