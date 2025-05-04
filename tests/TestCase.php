@@ -2,40 +2,42 @@
 
 namespace Tests;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Orchestra\Testbench\TestCase as BaseTestCase;
-use BIM\ActionLogger\ActionLoggerServiceProvider;
-use BIM\ActionLogger\Services\LogBatch;
-use Spatie\Activitylog\ActivitylogServiceProvider;
-use Tests\Models\User;
-use Illuminate\Support\Facades\File;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Spatie\Activitylog\Models\Activity;
+use Spatie\Activitylog\ActivitylogServiceProvider;
+use BIM\ActionLogger\Services\ActionLoggerService;
+use BIM\ActionLogger\Processors\ProcessorFactory;
+use BIM\ActionLogger\ActionLoggerServiceProvider;
+use Orchestra\Testbench\Concerns\CreatesApplication;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Artisan;
 
-class TestCase extends BaseTestCase
+abstract class TestCase extends BaseTestCase
 {
     use RefreshDatabase;
+
+    protected ActionLoggerService $actionLogger;
+    protected ProcessorFactory $processorFactory;
 
     protected function setUp(): void
     {
         parent::setUp();
-
-        $this->loadMigrationsFrom(__DIR__ . '/database/migrations');
-        $this->artisan('migrate', ['--database' => 'testbench'])->run();
-
-        // Set up test environment
-        $this->app['config']->set('database.default', 'testbench');
-        $this->app['config']->set('database.connections.testbench', [
-            'driver'   => 'sqlite',
-            'database' => ':memory:',
-            'prefix'   => '',
-        ]);
-
-        // Set up auth configuration
-        $this->app['config']->set('auth.defaults.guard', 'web');
-        $this->app['config']->set('auth.guards.web', [
-            'driver' => 'session',
-            'provider' => 'users',
-        ]);
+        
+        // Configure the package
+        Config::set('activitylog.table_name', 'activity_log');
+        Config::set('activitylog.database_connection', 'testing');
+        
+        // Run migrations
+        $this->runMigrations();
+        
+        // Create service instances
+        $this->processorFactory = app(ProcessorFactory::class);
+        $this->actionLogger = app(ActionLoggerService::class);
     }
 
     protected function getPackageProviders($app)
@@ -48,24 +50,66 @@ class TestCase extends BaseTestCase
 
     protected function getEnvironmentSetUp($app)
     {
-        // Set up test environment
-        $app['config']->set('database.default', 'testbench');
-        $app['config']->set('database.connections.testbench', [
-            'driver'   => 'sqlite',
+        // Setup default database to use sqlite :memory:
+        $app['config']->set('database.default', 'testing');
+        $app['config']->set('database.connections.testing', [
+            'driver' => 'sqlite',
             'database' => ':memory:',
-            'prefix'   => '',
+            'prefix' => '',
         ]);
 
-        // Set up auth configuration
-        $app['config']->set('auth.defaults.guard', 'web');
-        $app['config']->set('auth.guards.web', [
-            'driver' => 'session',
-            'provider' => 'users',
-        ]);
+        // Load package configuration
+        $app['config']->set('action-logger', require __DIR__.'/../src/Config/action-logger.php');
+    }
 
-        // Set up activity log configuration
-        $app['config']->set('activitylog.enabled', true);
-        $app['config']->set('activitylog.default_log_name', 'default');
-        $app['config']->set('activitylog.default_causer_type', 'App\Models\User');
+    protected function runMigrations(): void
+    {
+        // Get the migrations path
+        $this->loadMigrationsFrom(__DIR__ . '/database/migrations');
+        $this->artisan('migrate')->run();
+    }
+
+    protected function createActivity(array $attributes = []): Activity
+    {
+        return Activity::create(array_merge([
+            'log_name' => 'default',
+            'description' => 'Test activity',
+            'subject_type' => 'App\Models\User',
+            'subject_id' => 1,
+            'causer_type' => 'App\Models\User',
+            'causer_id' => 1,
+            'properties' => ['attributes' => []],
+            'batch_uuid' => null,
+        ], $attributes));
+    }
+
+    protected function createBatchActivities(int $count, string $batchUuid, array $attributes = []): Collection
+    {
+        $activities = collect();
+        for ($i = 0; $i < $count; $i++) {
+            $activities->push($this->createActivity(array_merge([
+                'batch_uuid' => $batchUuid,
+                'description' => 'Test activity ' . ($i + 1),
+            ], $attributes)));
+        }
+        return $activities;
+    }
+
+    protected function assertBatchDescription(string $expected, array $actual): void
+    {
+        $this->assertArrayHasKey('description', $actual);
+        $this->assertEquals($expected, $actual['description']);
+    }
+
+    protected function assertBatchChanges(array $expected, array $actual): void
+    {
+        $this->assertArrayHasKey('changes', $actual);
+        $this->assertEquals($expected, $actual['changes']);
+    }
+
+    protected function assertBatchType(string $expected, array $actual): void
+    {
+        $this->assertArrayHasKey('type', $actual);
+        $this->assertEquals($expected, $actual['type']);
     }
 } 

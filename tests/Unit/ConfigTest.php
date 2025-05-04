@@ -3,41 +3,32 @@
 namespace Tests\Unit;
 
 use Tests\TestCase;
-use BIM\ActionLogger\Enums\Action;
+use BIM\ActionLogger\Processors\BatchActionProcessor;
 
 class ConfigTest extends TestCase
 {
     /** @test */
     public function it_has_default_configuration()
     {
-        $config = $this->app['config']->get('action-logger');
-
-        $this->assertArrayHasKey('model_translations', $config);
-        $this->assertArrayHasKey('action_class', $config);
-        $this->assertEquals(Action::class, $config['action_class']);
+        $this->assertEquals(BatchActionProcessor::class, config('action-logger.default_processors.default'));
+        $this->assertIsArray(config('action-logger.route_processors'));
+        $this->assertIsArray(config('action-logger.controller_processors'));
+        $this->assertEquals(['delete_discarded' => false], config('action-logger.batch'));
     }
 
     /** @test */
     public function it_can_override_configuration()
     {
-        $this->app['config']->set('action-logger.model_translations', [
-            'App\Models\User' => 'custom_user',
-            'App\Models\Post' => 'custom_post',
-        ]);
+        config(['action-logger.default_processors.default' => 'CustomProcessor']);
+        $this->assertEquals('CustomProcessor', config('action-logger.default_processors.default'));
 
-        $config = $this->app['config']->get('action-logger');
+        config(['action-logger.route_processors' => ['test.route' => 'TestProcessor']]);
+        $this->assertEquals(['test.route' => 'TestProcessor'], config('action-logger.route_processors'));
 
-        $this->assertEquals('custom_user', $config['model_translations']['App\Models\User']);
-        $this->assertEquals('custom_post', $config['model_translations']['App\Models\Post']);
-    }
+        config(['action-logger.controller_processors' => ['App\Controller@action' => 'TestProcessor']]);
+        $this->assertEquals(['App\Controller@action' => 'TestProcessor'], config('action-logger.controller_processors'));
 
-    /** @test */
-    public function it_can_use_custom_action_class()
-    {
-        $this->app['config']->set('action-logger.action_class', 'App\Enums\CustomAction');
-
-        $config = $this->app['config']->get('action-logger');
-
-        $this->assertEquals('App\Enums\CustomAction', $config['action_class']);
+        config(['action-logger.batch.delete_discarded' => true]);
+        $this->assertEquals(['delete_discarded' => true], config('action-logger.batch'));
     }
 } 

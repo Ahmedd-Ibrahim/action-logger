@@ -5,6 +5,7 @@ namespace BIM\ActionLogger\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use BIM\ActionLogger\Services\ActionLoggerService;
+use BIM\ActionLogger\Resources\ActionLogResource;
 use Spatie\Activitylog\Models\Activity;
 
 class ActionLogController
@@ -60,15 +61,12 @@ class ActionLogController
         // Get batches
         $batches = $query->get()
             ->map(function ($activity) {
-                return $this->actionLogger->processActivities(
-                    $this->actionLogger->getBatchActivities($activity->batch_uuid)
-                );
+                return $this->actionLogger->getBatchActivities($activity->batch_uuid);
             });
 
-        return response()->json([
-            'batches' => $batches,
-            'total' => $batches->count(),
-        ]);
+        return ActionLogResource::collection($batches)
+            ->additional(['total' => $batches->count()])
+            ->response();
     }
 
     /**
@@ -84,8 +82,6 @@ class ActionLogController
             ], 404);
         }
 
-        $result = $this->actionLogger->processActivities($activities);
-
-        return response()->json($result);
+        return (new ActionLogResource($activities))->response();
     }
 } 

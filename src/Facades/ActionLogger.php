@@ -2,27 +2,29 @@
 
 namespace BIM\ActionLogger\Facades;
 
-use BIM\ActionLogger\Services\ActionLoggerService;
 use Illuminate\Support\Facades\Facade;
-use BIM\ActionLogger\Contracts\ActionInterface;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Collection;
+use BIM\ActionLogger\Services\ActionLoggerService;
 
 /**
- * @method static ActionLoggerService on(Model|array|Collection $subject)
- * @method static ActionLoggerService by(Model $causer)
- * @method static ActionLoggerService withProperties(array $properties)
- * @method static ActionLoggerService withDescription(string $description)
- * @method static ActionLoggerService withLogName(string $logName)
- * @method static void log(ActionInterface $action, array $extraProperties = [])
- * @method static void create(array $extraProperties = [])
- * @method static void update(array $extraProperties = [])
- * @method static void delete(array $extraProperties = [])
- * @method static void quickLog(Model|array|Collection $subject, Model $causer, ActionInterface $action, array $properties = [], ?string $logName = null)
+ * @method static string startBatch(?string $batchUuid = null)
+ * @method static bool commitBatch()
+ * @method static bool discardBatch()
+ * @method static string|null getCurrentBatchUuid()
+ * @method static bool hasBatch()
+ * @method static array process($activities)
+ * @method static object forSubject($subject)
+ * @method static \Illuminate\Support\Collection all()
+ * 
+ * @see \BIM\ActionLogger\Services\ActionLoggerService
  */
 class ActionLogger extends Facade
 {
-    protected static function getFacadeAccessor(): string
+    /**
+     * Get the registered name of the component.
+     *
+     * @return string
+     */
+    protected static function getFacadeAccessor()
     {
         return 'action-logger';
     }

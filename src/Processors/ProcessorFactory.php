@@ -3,63 +3,117 @@
 namespace BIM\ActionLogger\Processors;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Spatie\Activitylog\Models\Activity;
+use BIM\ActionLogger\Contracts\ActionProcessorInterface;
+use BIM\ActionLogger\Processors\BatchActionProcessor;
+use BIM\ActionLogger\Processors\CreatedActionProcessor;
+use BIM\ActionLogger\Processors\UpdatedActionProcessor;
+use BIM\ActionLogger\Processors\DeletedActionProcessor;
 
+/**
+ * Factory for creating action processors
+ * 
+ * This factory determines the appropriate processor for a set of activities
+ * based on route information from batch metadata.
+ */
 class ProcessorFactory
 {
     /**
-     * The processor cache
+     * Create a new factory instance
      */
-    protected array $processorCache = [];
+    public function __construct()
+    {
+    }
 
     /**
      * Get the appropriate processor for the given activities
+     * 
+     * @param Collection|Activity $activities Activities to process
+     * @return ActionProcessorInterface The processor for the activities
      */
-    public function getProcessor(Collection $activities): BaseActionProcessor
+    public function getProcessor(Collection|Activity $activities): ActionProcessorInterface
     {
-        $mainActivity = $activities->first();
-        
-        if (!$mainActivity) {
+        // Convert single activity to collection
+        if ($activities instanceof Activity) {
+            $activities = collect([$activities]);
+        }
+
+        if ($activities->isEmpty()) {
             return new BatchActionProcessor($activities);
         }
 
-        $actionType = $this->resolveActionType($mainActivity);
+        // Get the first activity to determine route information
+        $firstActivity = $activities->first();
         
-        return $this->createProcessor($actionType, $activities);
-    }
-
-    /**
-     * Create a processor instance
-     */
-    protected function createProcessor(string $actionType, Collection $activities): BaseActionProcessor
-    {
-        // Check cache first
-        if (isset($this->processorCache[$actionType])) {
-            return new $this->processorCache[$actionType]($activities);
+        // Try to find a processor based on route information
+        $processor = $this->resolveProcessorFromRoute($firstActivity);
+        
+        if ($processor && class_exists($processor)) {
+            return new $processor($activities);
         }
-
-        // Check for custom processor
-        $customProcessor = config('action-logger.custom_processors.'.$actionType);
-        if ($customProcessor && class_exists($customProcessor)) {
-            $this->processorCache[$actionType] = $customProcessor;
-            return new $customProcessor($activities);
+        
+        // Fallback to default processor
+        $defaultProcessorClass = config('action-logger.default_processors.default', BatchActionProcessor::class);
+        if (is_string($defaultProcessorClass) && class_exists($defaultProcessorClass)) {
+            return new $defaultProcessorClass($activities);
         }
-
-        // Check for standard processor
-        $standardProcessor = $this->getStandardProcessor($actionType);
-        if ($standardProcessor) {
-            $this->processorCache[$actionType] = $standardProcessor;
-            return new $standardProcessor($activities);
-        }
-
-        // Default to batch processor
+        
+        // Last resort fallback
         return new BatchActionProcessor($activities);
     }
+    
+    /**
+     * Resolve processor based on route information
+     *
+     * @param Activity $activity
+     * @return string|null
+     */
+    protected function resolveProcessorFromRoute(Activity $activity): ?string
+    {
+        // Extract route information from batch metadata
+        $properties = $activity->properties ? $activity->properties->toArray() : [];
+        $batchMetadata = $properties['batch_metadata'] ?? null;
+        
+        if (!$batchMetadata) {
+            return null;
+        }
+        
+        // Check for route name processor
+        if (isset($batchMetadata['name'])) {
+            $routeName = $batchMetadata['name'];
+            $routeProcessors = config('action-logger.route_processors', []);
+            
+            // Direct match
+            if (isset($routeProcessors[$routeName])) {
+                return $routeProcessors[$routeName];
+            }
+            
+            // Pattern match
+            foreach ($routeProcessors as $pattern => $processorClass) {
+                if (Str::is($pattern, $routeName)) {
+                    return $processorClass;
+                }
+            }
+        }
+        
+        // Check for controller action processor
+        if (isset($batchMetadata['controller'], $batchMetadata['action'])) {
+            $controllerAction = $batchMetadata['controller'] . '@' . $batchMetadata['action'];
+            $controllerProcessors = config('action-logger.controller_processors', []);
+            
+            if (isset($controllerProcessors[$controllerAction])) {
+                return $controllerProcessors[$controllerAction];
+            }
+        }
+        
+        return null;
+    }
 
     /**
-     * Get the standard processor for an action type
+     * Get the standard processor for an event type
      */
-    protected function getStandardProcessor(string $actionType): ?string
+    protected function getStandardProcessor(string $eventType): ?string
     {
         $processors = [
             'created' => CreatedActionProcessor::class,
@@ -67,33 +121,6 @@ class ProcessorFactory
             'deleted' => DeletedActionProcessor::class,
         ];
 
-        return $processors[$actionType] ?? null;
-    }
-
-    /**
-     * Resolve the action type from the activity
-     */
-    protected function resolveActionType(Activity $activity): string
-    {
-        // First check if there's a custom processor for this action
-        $customProcessor = config('action-logger.custom_processors.'.$activity->description);
-        if ($customProcessor) {
-            return $activity->description;
-        }
-
-        // Then check if it's a standard action
-        $standardActions = ['created', 'updated', 'deleted'];
-        if (in_array($activity->description, $standardActions)) {
-            return $activity->description;
-        }
-
-        // Finally, check custom actions
-        $customActions = config('action-logger.custom_actions', []);
-        if (isset($customActions[$activity->description])) {
-            return $activity->description;
-        }
-
-        // Default to the activity description
-        return $activity->description;
+        return $processors[$eventType] ?? null;
     }
 } 

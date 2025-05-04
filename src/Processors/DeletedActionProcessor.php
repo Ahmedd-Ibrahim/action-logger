@@ -2,82 +2,63 @@
 
 namespace BIM\ActionLogger\Processors;
 
-use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Lang;
+use Spatie\Activitylog\Models\Activity;
+use Illuminate\Support\Str;
 
-class DeletedActionProcessor extends BatchActionProcessor
+/**
+ * Processor for 'deleted' activities across all models
+ */
+class DeletedActionProcessor extends BaseActionProcessor
 {
-    public function process(): array
+    /**
+     * Supported events for this processor
+     */
+    protected static array $supportedEvents = ['deleted'];
+
+    /**
+     * Process the activities and return the processed data
+     */
+    protected function processActivities(): array
     {
-        $result = parent::process();
+        // Group activities by subject type for processing
+        $groupedByType = $this->activities->groupBy('subject_type');
         
-        // Add deleted-specific information
-        foreach ($result['batches'] as &$batch) {
-            // Add deleted-specific message if not already set
-            if (!isset($batch['message'])) {
-                $batch['message'] = $this->constructDeletedMessage($batch['entities']);
-            }
+        $result = [];
+        
+        foreach ($groupedByType as $subjectType => $typeActivities) {
+            // Group by subject_id within each type
+            $groupedById = $typeActivities->groupBy('subject_id');
             
-            // Add deletion metadata
-            $batch['deletion_metadata'] = $this->extractDeletionMetadata($batch['entities']);
+            foreach ($groupedById as $subjectId => $activities) {
+                foreach ($activities as $activity) {
+                    $result[] = $this->processActivity($activity);
+                }
+            }
         }
         
         return $result;
     }
 
     /**
-     * Construct a message specific to deleted actions
+     * Process a single activity and return essential data
      */
-    protected function constructDeletedMessage(array $entities): string
+    protected function processActivity(Activity $activity): array
     {
-        if (empty($entities)) {
-            return 'No entities deleted';
-        }
-
-        $messageParts = [];
+        $data = parent::processActivity($activity);
         
-        // Get the main entity
-        $mainEntity = $entities[0] ?? null;
-        if ($mainEntity) {
-            $entityName = Lang::get('action-logger::models.'.strtolower(class_basename($mainEntity['type'])));
-            $messageParts[] = $entityName;
-            
-            // Add entity identifier if available
-            if (isset($mainEntity['data']['id'])) {
-                $messageParts[] = '#'.$mainEntity['data']['id'];
-            }
-        }
+        $subject = $this->getReadableModelName($activity->subject_type);
+        $data['entity_name'] = $subject;
         
-        $messageParts[] = 'has been deleted';
-        
-        return implode(' ', $messageParts);
+        return $data;
     }
-
+    
     /**
-     * Extract metadata about the deleted entities
+     * Get a readable model name from a class name
      */
-    protected function extractDeletionMetadata(array $entities): array
+    protected function getReadableModelName(string $className): string
     {
-        $metadata = [
-            'total_deleted' => count($entities),
-            'deleted_types' => [],
-            'deleted_ids' => [],
-            'deleted_data' => [],
-        ];
-        
-        foreach ($entities as $entity) {
-            $metadata['deleted_types'][] = $entity['type'];
-            $metadata['deleted_ids'][] = $entity['id'];
-            $metadata['deleted_data'][] = [
-                'type' => $entity['type'],
-                'id' => $entity['id'],
-                'data' => $entity['data'],
-            ];
-        }
-        
-        $metadata['deleted_types'] = array_unique($metadata['deleted_types']);
-        
-        return $metadata;
+        $baseName = class_basename($className);
+        return Str::snake($baseName, ' ');
     }
 } 

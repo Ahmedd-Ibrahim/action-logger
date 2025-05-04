@@ -2,114 +2,63 @@
 
 namespace BIM\ActionLogger\Processors;
 
-use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Lang;
+use Spatie\Activitylog\Models\Activity;
+use Illuminate\Support\Str;
 
-class UpdatedActionProcessor extends BatchActionProcessor
+/**
+ * Processor for 'updated' activities across all models
+ */
+class UpdatedActionProcessor extends BaseActionProcessor
 {
-    public function process(): array
+    /**
+     * Supported events for this processor
+     */
+    protected static array $supportedEvents = ['updated'];
+
+    /**
+     * Process the activities and return the processed data
+     */
+    protected function processActivities(): array
     {
-        $result = parent::process();
+        // Group activities by subject type for processing
+        $groupedByType = $this->activities->groupBy('subject_type');
         
-        // Add updated-specific information
-        foreach ($result['batches'] as &$batch) {
-            // Add updated-specific message if not already set
-            if (!isset($batch['message'])) {
-                $batch['message'] = $this->constructUpdatedMessage($batch['entities'], $batch['changes']);
-            }
+        $result = [];
+        
+        foreach ($groupedByType as $subjectType => $typeActivities) {
+            // Group by subject_id within each type
+            $groupedById = $typeActivities->groupBy('subject_id');
             
-            // Add change statistics
-            $batch['change_stats'] = $this->calculateChangeStats($batch['changes']);
+            foreach ($groupedById as $subjectId => $activities) {
+                foreach ($activities as $activity) {
+                    $result[] = $this->processActivity($activity);
+                }
+            }
         }
         
         return $result;
     }
 
     /**
-     * Construct a message specific to updated actions
+     * Process a single activity and return essential data
      */
-    protected function constructUpdatedMessage(array $entities, array $changes): string
+    protected function processActivity(Activity $activity): array
     {
-        if (empty($entities)) {
-            return 'No entities updated';
-        }
-
-        $messageParts = [];
+        $data = parent::processActivity($activity);
         
-        // Get the main entity
-        $mainEntity = $entities[0] ?? null;
-        if ($mainEntity) {
-            $entityName = Lang::get('action-logger::models.'.strtolower(class_basename($mainEntity['type'])));
-            $messageParts[] = $entityName;
-            
-            // Add entity identifier if available
-            if (isset($mainEntity['data']['id'])) {
-                $messageParts[] = '#'.$mainEntity['data']['id'];
-            }
-        }
+        $subject = $this->getReadableModelName($activity->subject_type);
+        $data['entity_name'] = $subject;
         
-        // Add status changes first if any
-        foreach ($changes as $change) {
-            if (isset($change['changes']['status'])) {
-                $statusChange = $change['changes']['status'];
-                $messageParts[] = 'has been';
-                $messageParts[] = $statusChange['to'];
-                break;
-            }
-        }
-        
-        // Add other changes
-        $otherChanges = [];
-        foreach ($changes as $change) {
-            foreach ($change['changes'] as $key => $value) {
-                if ($key !== 'status' && $key !== 'updated_at') {
-                    $otherChanges[] = $value['label'].' to '.$value['to'];
-                }
-            }
-        }
-        
-        if (!empty($otherChanges)) {
-            if (empty($messageParts)) {
-                $messageParts[] = 'has been updated';
-            }
-            $messageParts[] = 'with';
-            $messageParts[] = implode(', ', $otherChanges);
-        }
-        
-        return implode(' ', $messageParts);
+        return $data;
     }
-
+    
     /**
-     * Calculate statistics about the changes
+     * Get a readable model name from a class name
      */
-    protected function calculateChangeStats(array $changes): array
+    protected function getReadableModelName(string $className): string
     {
-        $stats = [
-            'total_changes' => 0,
-            'changed_fields' => [],
-            'status_changed' => false,
-            'changed_values' => [],
-        ];
-        
-        foreach ($changes as $change) {
-            foreach ($change['changes'] as $key => $value) {
-                $stats['total_changes']++;
-                $stats['changed_fields'][] = $key;
-                $stats['changed_values'][$key] = [
-                    'from' => $value['from'],
-                    'to' => $value['to'],
-                    'label' => $value['label'],
-                ];
-                
-                if ($key === 'status') {
-                    $stats['status_changed'] = true;
-                }
-            }
-        }
-        
-        $stats['changed_fields'] = array_unique($stats['changed_fields']);
-        
-        return $stats;
+        $baseName = class_basename($className);
+        return Str::snake($baseName, ' ');
     }
 } 

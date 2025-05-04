@@ -5,13 +5,24 @@ namespace BIM\ActionLogger\Processors;
 use Spatie\Activitylog\Models\Activity;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Lang;
+use BIM\ActionLogger\Contracts\ActionProcessorInterface;
 
-class BatchActionProcessor extends BaseActionProcessor
+class BatchActionProcessor extends BaseActionProcessor implements ActionProcessorInterface
 {
     /**
-     * The translation key prefix for attributes
+     * The batch type
      */
-    protected string $attributeTranslationPrefix = 'action-logger::attributes';
+    protected ?string $batchType = null;
+
+    /**
+     * The supported action types
+     */
+    protected static array $supportedActions = ['batch', 'updated', 'created', 'deleted'];
+
+    /**
+     * The processor priority
+     */
+    protected static int $priority = 0;
 
     /**
      * The fallback translation key prefix for attributes
@@ -28,117 +39,164 @@ class BatchActionProcessor extends BaseActionProcessor
      */
     protected $customTranslator = null;
 
-    public function process(): array
+    /**
+     * Set the batch type
+     */
+    public function setBatchType(string $type): self
     {
-        // Group activities by their batch UUID
-        $groupedActivities = $this->activities->groupBy('batch_uuid');
+        $this->batchType = $type;
+        return $this;
+    }
+
+    /**
+     * Get the current batch type
+     */
+    public function getBatchType(): ?string
+    {
+        return $this->batchType;
+    }
+
+    /**
+     * Process the activities and return the processed data
+     */
+    protected function processActivities(): array
+    {
+        // Group activities by batch UUID
+        $groupedByBatch = $this->activities->groupBy('batch_uuid');
         
-        $processedBatches = [];
+        $result = [];
         
-        foreach ($groupedActivities as $batchUuid => $activities) {
-            // Get the main activity (usually the first one in the batch)
-            $mainActivity = $activities->first();
+        foreach ($groupedByBatch as $batchUuid => $batchActivities) {
+            // Process each batch
+            $batchData = $this->processBatchGroup($batchUuid ?: null);
             
-            if (!$mainActivity) {
-                continue;
+            if (!empty($batchData)) {
+                $result[] = $batchData;
             }
-            
-            // Process all activities in the batch
-            $processedActivities = $activities->map(fn (Activity $activity) => $this->processActivity($activity));
-            
-            // Extract all changes and entities from activities
-            $changes = $this->extractAllChanges($processedActivities);
-            $entities = $this->extractEntities($processedActivities);
-            
-            // Get the action type from the main activity
-            $actionType = $this->resolveActionType($mainActivity);
-            
-            // Get the message from translation
-            $message = $this->getTranslatedMessage($actionType, $entities, $changes);
-            
-            $processedBatches[] = [
-                'message' => $message,
-                'changes' => $changes,
-                'entities' => $entities,
-                'action_type' => $actionType,
+        }
+        
+        return $result;
+    }
+
+    /**
+     * Process a batch of activities by batch uuid
+     */
+    protected function processBatchGroup(?string $batchUuid = null): array
+    {
+        return parent::processBatch($batchUuid);
+    }
+
+    /**
+     * Generate a batch message for specific model type
+     */
+    protected function generateBatchMessage(
+        Activity $primaryActivity,
+        ?string $commonModelType,
+        string $commonAction,
+        array $entities
+    ): string {
+        // Get causer name
+        $causerName = 'System';
+        if ($primaryActivity->causer) {
+            $causerName = $this->getCauserName($primaryActivity->causer);
+        }
+
+        // Get translated model name
+        $modelName = 'entity';
+        if ($commonModelType) {
+            $modelName = $this->translateModelName($commonModelType);
+        }
+        
+        // Get translated action
+        $action = $this->translateAction($commonAction);
+        
+        // Get entity IDs
+        $entityIds = collect($entities)->pluck('id');
+        
+        // Build the message based on entity count
+        if ($entityIds->count() === 1) {
+            // Single entity
+            $id = $entityIds->first();
+            return "{$causerName} {$action} {$modelName} #{$id}";
+        } elseif ($entityIds->count() > 1) {
+            // Multiple entities
+            $count = $entityIds->count();
+            return "{$causerName} {$action} {$count} {$modelName}" . ($count > 1 ? 's' : '');
+        } else {
+            // No entities (should not happen)
+            return "{$causerName} {$action} {$modelName}";
+        }
+    }
+    
+    /**
+     * Format changes with translations for a specific model
+     * 
+     * @param string $modelType The model class name
+     * @param object $model The model instance
+     * @param array $changes The changes to format
+     * @return array The formatted changes
+     */
+    protected function formatChangesWithTranslations(string $modelType, object $model, array $changes): array
+    {
+        $formatted = parent::formatChangesWithTranslations($modelType, $model, $changes);
+        
+        // Add additional formatting if needed for batch processor
+        foreach ($formatted as &$change) {
+            // Format for specific model types if needed
+            if (method_exists($model, 'formatChangeForDisplay')) {
+                $formattedChange = $model->formatChangeForDisplay(
+                    $change['attribute'],
+                    $change['old_value'],
+                    $change['new_value']
+                );
+                
+                if ($formattedChange) {
+                    $change = array_merge($change, $formattedChange);
+                }
+            }
+        }
+        
+        return $formatted;
+    }
+
+    /**
+     * Translate a model name
+     */
+    protected function translateModelName(string $modelType): string
+    {
+        $key = 'activity.models.' . strtolower(class_basename($modelType));
+        return Lang::has($key) ? Lang::get($key) : class_basename($modelType);
+    }
+
+    /**
+     * Translate model attributes
+     */
+    protected function translateAttributes(string $modelType, array $attributes): array
+    {
+        $translated = [];
+        $modelKey = strtolower(class_basename($modelType));
+        
+        foreach ($attributes as $key => $value) {
+            $translationKey = "activity.attributes.{$modelKey}.{$key}";
+            $translated[$key] = [
+                'label' => Lang::has($translationKey) ? Lang::get($translationKey) : $key,
+                'value' => $value
             ];
         }
         
-        return [
-            'batches' => $processedBatches,
-            'total_batches' => count($processedBatches),
-        ];
+        return $translated;
     }
 
     /**
-     * Get the translated message for the action
+     * Determine the action performed on the activities
      */
-    protected function getTranslatedMessage(string $actionType, array $entities, array $changes): string
+    protected function determineAction(Collection $activities): string
     {
-        // Get the main entity (usually the first one)
-        $mainEntity = $entities[0] ?? null;
-        if (!$mainEntity) {
-            return 'No changes recorded';
+        $actions = $activities->pluck('event')->unique();
+        if ($actions->count() === 1) {
+            return $actions->first();
         }
-
-        $entityName = Lang::get('action-logger::models.'.strtolower(class_basename($mainEntity['type'])));
-        $entityId = $mainEntity['data']['id'] ?? null;
-        $entityIdentifier = $entityId ? "#{$entityId}" : '';
-
-        // Get the translation key for the action
-        $translationKey = "action-logger::messages.{$actionType}";
-        
-        // Prepare translation parameters
-        $parameters = [
-            'model' => $entityName . $entityIdentifier,
-            'user' => $mainEntity['data']['causer']['name'] ?? 'Unknown',
-        ];
-
-        // Add changes to parameters if needed
-        foreach ($changes as $change) {
-            foreach ($change['changes'] as $key => $value) {
-                $parameters[$key] = $value['to'];
-            }
-        }
-
-        // Get the translated message
-        return Lang::get($translationKey, $parameters);
-    }
-
-    /**
-     * Resolve the action type from the activity
-     */
-    protected function resolveActionType(Activity $activity): string
-    {
-        // First check if there's a custom processor for this action
-        $customProcessor = config('action-logger.custom_processors.'.$activity->description);
-        if ($customProcessor) {
-            return $activity->description;
-        }
-
-        // Then check if it's a standard action
-        $standardActions = ['created', 'updated', 'deleted'];
-        if (in_array($activity->description, $standardActions)) {
-            return $activity->description;
-        }
-
-        // Finally, check custom actions
-        $customActions = config('action-logger.custom_actions', []);
-        if (isset($customActions[$activity->description])) {
-            return $activity->description;
-        }
-
-        // Default to the activity description
-        return $activity->description;
-    }
-
-    /**
-     * Set the attribute translation prefix
-     */
-    public function setAttributeTranslationPrefix(string $prefix): self
-    {
-        $this->attributeTranslationPrefix = $prefix;
-        return $this;
+        return 'modified';
     }
 
     /**
@@ -151,7 +209,7 @@ class BatchActionProcessor extends BaseActionProcessor
     }
 
     /**
-     * Set a custom attribute formatter function
+     * Set a custom attribute formatter
      */
     public function setAttributeFormatter(callable $formatter): self
     {
@@ -160,14 +218,152 @@ class BatchActionProcessor extends BaseActionProcessor
     }
 
     /**
-     * Set a custom translation function
+     * Set a custom translator
      */
     public function setCustomTranslator(callable $translator): self
     {
         $this->customTranslator = $translator;
         return $this;
     }
-    
+
+    /**
+     * Process entities with their changes
+     */
+    protected function processEntitiesWithChanges(array $activities): array
+    {
+        $entities = [];
+        $modelInstances = [];
+        
+        foreach ($activities as $activity) {
+            if (!isset($activity['subject_type'], $activity['subject_id'])) continue;
+
+            $entityKey = $activity['subject_type'] . '_' . $activity['subject_id'];
+            
+            if (!isset($entities[$entityKey])) {
+                if (!isset($modelInstances[$entityKey])) {
+                    $modelInstances[$entityKey] = $this->createModelInstance(
+                        $activity['subject_type'],
+                        $activity['properties']['attributes'] ?? [],
+                        $activity['properties']['old'] ?? []
+                    );
+                }
+                
+                if ($modelInstances[$entityKey]) {
+                    $model = $modelInstances[$entityKey];
+                    $entities[$entityKey] = [
+                        'type' => $activity['subject_type'],
+                        'id' => $activity['subject_id'],
+                        'label' => $this->getEntityLabel($model, $activity['subject_id']),
+                        'changes' => [],
+                    ];
+                }
+            }
+            
+            if (isset($activity['properties']['attributes'], $activity['properties']['old'])) {
+                $changes = $this->getChangesWithCasts(
+                    $modelInstances[$entityKey],
+                    $activity['properties']['attributes'],
+                    $activity['properties']['old']
+                );
+                
+                if (!empty($changes)) {
+                    $entities[$entityKey]['changes'][] = [
+                        'activity_id' => $activity['id'],
+                        'changes' => $this->formatBatchChanges($changes),
+                    ];
+                }
+            }
+        }
+        
+        return array_values($entities);
+    }
+
+    /**
+     * Create a model instance with properties
+     */
+    protected function createModelInstance(string $modelType, array $attributes = [], array $old = []): ?object
+    {
+        try {
+            $model = new $modelType();
+            $model->setRawAttributes($attributes);
+            return $model;
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Get the entity label
+     */
+    protected function getEntityLabel($model, $id): string
+    {
+        $type = class_basename($model);
+        $entityName = Lang::get('validation.attributes.' . strtolower($type));
+        return "{$entityName} #{$id}";
+    }
+
+    /**
+     * Get the changes between old and new values with proper casts
+     */
+    protected function getChangesWithCasts($model, array $new, array $old): array
+    {
+        $changes = [];
+        foreach ($new as $key => $value) {
+            if (!isset($old[$key]) || $old[$key] !== $value) {
+                $changes[$key] = [
+                    'from' => $old[$key] ?? null,
+                    'to' => $value
+                ];
+            }
+        }
+        return $changes;
+    }
+
+    /**
+     * Format the changes with translated and formatted attributes
+     * 
+     * @param array $changes The changes to format
+     * @return array Formatted changes
+     */
+    protected function formatBatchChanges(array $changes): array
+    {
+        $formattedChanges = [];
+        foreach ($changes as $key => $change) {
+            $formattedChanges[] = [
+                'key' => $key,
+                'label' => $this->getTranslatedAttribute($key),
+                'old_value' => $change['from'],
+                'new_value' => $change['to'],
+            ];
+        }
+        return $formattedChanges;
+    }
+
+    /**
+     * Format an attribute value using the custom formatter if available
+     * 
+     * @param string $key The attribute key
+     * @param mixed $value The attribute value
+     * @return mixed The formatted value
+     */
+    protected function formatBatchAttributeValue(string $key, $value)
+    {
+        if ($this->attributeFormatter) {
+            return ($this->attributeFormatter)($key, $value);
+        }
+        
+        return $value;
+    }
+
+    /**
+     * Get the translated attribute name
+     */
+    protected function getTranslatedAttribute(string $key): string
+    {
+        $translationKey = "{$this->fallbackAttributeTranslationPrefix}.{$key}";
+        return Lang::has($translationKey) ? Lang::get($translationKey) : $key;
+    }
+
     /**
      * Extract all changes from activities in a batch
      */
@@ -179,14 +375,19 @@ class BatchActionProcessor extends BaseActionProcessor
             $properties = $activity['properties'] ?? [];
             
             if (isset($properties['attributes']) && isset($properties['old'])) {
-                $subjectChanges = $this->getChanges($properties['attributes'], $properties['old']);
+                // Create a model instance to handle casts
+                $model = $this->createModelInstance($activity['subject_type']);
                 
-                if (!empty($subjectChanges)) {
-                    $changes[] = [
-                        'subject_type' => $activity['subject_type'] ?? null,
-                        'subject_id' => $activity['subject_id'] ?? null,
-                        'changes' => $this->formatChanges($subjectChanges),
-                    ];
+                if ($model) {
+                    $subjectChanges = $this->getChangesWithCasts($model, $properties['attributes'], $properties['old']);
+                    
+                    if (!empty($subjectChanges)) {
+                        $changes[] = [
+                            'subject_type' => $activity['subject_type'] ?? null,
+                            'subject_id' => $activity['subject_id'] ?? null,
+                            'changes' => $this->formatBatchChanges($subjectChanges),
+                        ];
+                    }
                 }
             }
         }
@@ -195,40 +396,6 @@ class BatchActionProcessor extends BaseActionProcessor
     }
 
     /**
-     * Format the changes with translated and formatted attributes
-     */
-    protected function formatChanges(array $changes): array
-    {
-        $formattedChanges = [];
-        
-        foreach ($changes as $key => $change) {
-            $formattedKey = $this->getTranslatedAttribute($key);
-            $formattedChange = [
-                'key' => $key,
-                'label' => $formattedKey,
-                'from' => $this->formatAttributeValue($key, $change['from'] ?? null),
-                'to' => $this->formatAttributeValue($key, $change['to'] ?? null),
-            ];
-            
-            $formattedChanges[$key] = $formattedChange;
-        }
-        
-        return $formattedChanges;
-    }
-
-    /**
-     * Format an attribute value using the custom formatter if available
-     */
-    protected function formatAttributeValue(string $key, $value)
-    {
-        if ($this->attributeFormatter) {
-            return ($this->attributeFormatter)($key, $value);
-        }
-        
-        return $value;
-    }
-    
-    /**
      * Extract entities from activities
      */
     protected function extractEntities(Collection $activities): array
@@ -236,12 +403,17 @@ class BatchActionProcessor extends BaseActionProcessor
         $entities = [];
         
         foreach ($activities as $activity) {
-            if (isset($activity['subject'])) {
-                $entities[] = [
-                    'type' => $activity['subject_type'] ?? null,
-                    'id' => $activity['subject_id'] ?? null,
-                    'data' => $activity['subject'],
-                ];
+            if (isset($activity['subject_type']) && isset($activity['subject_id'])) {
+                // Create a new instance of the model
+                $model = $this->createModelInstance($activity['subject_type']);
+                
+                if ($model) {
+                    $entities[] = [
+                        'type' => $activity['subject_type'],
+                        'id' => $activity['subject_id'],
+                        'class_name' => get_class($model),
+                    ];
+                }
             }
         }
         
@@ -249,50 +421,18 @@ class BatchActionProcessor extends BaseActionProcessor
     }
 
     /**
-     * Get the translated attribute name
+     * Get the description for an entity
      */
-    protected function getTranslatedAttribute(string $key): string
+    protected function getEntityDescription(array $entity): string
     {
-        // Try custom translator first
-        if ($this->customTranslator) {
-            $translation = ($this->customTranslator)($key);
-            if ($translation !== null) {
-                return $translation;
-            }
+        $type = $entity['type'] ?? null;
+        $id = $entity['id'] ?? null;
+
+        if (!$type || !$id) {
+            return 'Unknown entity';
         }
 
-        // Try the custom translation next
-        $translationKey = "{$this->attributeTranslationPrefix}.{$key}";
-        if (Lang::has($translationKey)) {
-            return Lang::get($translationKey);
-        }
-
-        // Fallback to validation attributes
-        $fallbackKey = "{$this->fallbackAttributeTranslationPrefix}.{$key}";
-        if (Lang::has($fallbackKey)) {
-            return Lang::get($fallbackKey);
-        }
-
-        // If no translation found, return the key
-        return $key;
+        $entityName = Lang::get('validation.attributes.' . strtolower(class_basename($type)));
+        return "{$entityName} #{$id}";
     }
-    
-    /**
-     * Get the changes between old and new values
-     */
-    protected function getChanges(array $new, array $old): array
-    {
-        $changes = [];
-        
-        foreach ($new as $key => $value) {
-            if (!isset($old[$key]) || $old[$key] !== $value) {
-                $changes[$key] = [
-                    'from' => $old[$key] ?? null,
-                    'to' => $value
-                ];
-            }
-        }
-        
-        return $changes;
-    }
-} 
+}

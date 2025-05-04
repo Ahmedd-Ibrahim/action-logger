@@ -55,41 +55,95 @@ return [
     | Action Class
     |--------------------------------------------------------------------------
     |
-    | The class that will be used for action enums. This class must implement
-    | the BIM\ActionLogger\Contracts\ActionInterface interface.
+    | This is the class that contains the enum of standard actions.
+    | You can extend this with your own implementation.
     |
     */
     'action_class' => \BIM\ActionLogger\Enums\Action::class,
 
     /*
     |--------------------------------------------------------------------------
-    | Custom Processors
+    | Processor Resolution
     |--------------------------------------------------------------------------
     |
-    | Here you may define custom processors for specific actions.
-    | The key is the action name and the value is the fully qualified class name.
+    | Configure how processors are resolved based on subject type and action.
+    | 
+    | Dynamic processors are automatically resolved using the format:
+    | '{model}.{action}' where:
+    | - {model} is the snake_case base name of the subject class (e.g., 'rent_request')
+    | - {action} is the action value (e.g., 'created')
+    |
+    | Examples:
+    | - Subject: App\Models\RentRequest, Action: created = 'rent_request.created'
+    | - Subject: App\Models\User, Action: updated = 'user.updated'
     |
     */
-    'custom_processors' => [
-        // Example:
-        // 'approve' => \App\Processors\ApproveActionProcessor::class,
-        // 'reject' => \App\Processors\RejectActionProcessor::class,
+    'processor_resolution' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Namespace
+        |--------------------------------------------------------------------------
+        |
+        | The base namespace where processors are located.
+        | The system will look for processors in this namespace.
+        |
+        */
+        'namespace' => 'App\\Processors',
+
+        /*
+        |--------------------------------------------------------------------------
+        | Suffix
+        |--------------------------------------------------------------------------
+        |
+        | The suffix to append to processor class names.
+        |
+        */
+        'suffix' => 'Processor',
+
+        /*
+        |--------------------------------------------------------------------------
+        | Fallback Strategy
+        |--------------------------------------------------------------------------
+        |
+        | When a specific processor is not found, the system will try fallbacks:
+        | - 'model': Try a general processor for the model (e.g., 'rent_request.*')
+        | - 'action': Try a general processor for the action (e.g., '*.created')
+        | - 'none': Don't use fallbacks
+        |
+        */
+        'fallback_strategy' => 'model',
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Custom Actions
+    | Custom Processors
     |--------------------------------------------------------------------------
     |
-    | Here you may define custom actions that can be used in the logger.
-    | The key is the action name and the value is the translation key.
+    | Here you may explicitly define custom processors for specific subject-action
+    | combinations instead of relying on dynamic resolution.
+    |
+    | The key format is '{subject_type}.{action}' and the value is the
+    | fully qualified class name of the processor.
+    |
+    | Example:
+    | 'custom_processors' => [
+    |     'rent_request.created' => \App\Processors\RentRequestProcessor::class,
+    |     'user.updated' => \App\Processors\UserUpdatedProcessor::class,
+    | ],
     |
     */
-    'custom_actions' => [
-        'approve' => 'approved',
-        'reject' => 'rejected',
-        'accept' => 'accepted',
-    ],
+    'custom_processors' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Default Processor
+    |--------------------------------------------------------------------------
+    |
+    | The default processor to use when no specific processor is found
+    | for a subject-action combination.
+    |
+    */
+    'default_processor' => \BIM\ActionLogger\Processors\BatchActionProcessor::class,
 
     /*
     |--------------------------------------------------------------------------
@@ -114,7 +168,7 @@ return [
     | This option controls how the auto batch logging middleware is registered.
     | You can set it to:
     | - false: Don't register the middleware
-    | - true: Register as global middleware
+    | - true: Register as global middleware for the web group
     | - array: Register for specific middleware groups (e.g. ['web', 'api'])
     |
     */
@@ -125,14 +179,17 @@ return [
     | Excluded Routes
     |--------------------------------------------------------------------------
     |
-    | Here you may define routes that should be excluded from batch logging.
-    | You can use route patterns as defined in Laravel's route matching.
+    | Routes that should be excluded from automatic batch logging.
+    | You can use patterns like 'admin/*' to exclude entire route groups.
     |
     */
     'excluded_routes' => [
-        // Example:
-        // 'api/health',
-        // 'admin/*',
+        'horizon*',
+        'telescope*',
+        '_debugbar*',
+        '_ignition*',
+        'api/health',
+        'livewire*',
     ],
 
     /*
@@ -140,8 +197,13 @@ return [
     | Batch Name Resolver
     |--------------------------------------------------------------------------
     |
-    | Here you may define a callback that will be used to generate batch names.
-    | The callback will receive the current request as its only argument.
+    | A custom callback to generate batch names based on the request.
+    | This function receives the request object and should return a string.
+    |
+    | Example:
+    | 'batch_name_resolver' => function($request) {
+    |     return $request->user()->id . '_' . $request->method() . '_' . $request->path();
+    | }
     |
     */
     'batch_name_resolver' => null,
@@ -163,21 +225,6 @@ return [
         'created' => '{entity} #{id} has been created with {changes}',
         'updated' => '{entity} #{id} has been updated with {changes}',
         'deleted' => '{entity} #{id} has been deleted',
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Attribute Formatters
-    |--------------------------------------------------------------------------
-    |
-    | Here you may define custom formatters for specific attributes.
-    | The key is the attribute name and the value is the formatter class.
-    |
-    */
-    'attribute_formatters' => [
-        // Example:
-        // 'status' => \App\Formatters\StatusFormatter::class,
-        // 'date' => \App\Formatters\DateFormatter::class,
     ],
 
     /*
@@ -214,4 +261,88 @@ return [
     |
     */
     'table_name' => 'activity_log',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Batch Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Here you may configure the batch processing behavior.
+    |
+    */
+    'batch' => [
+        // Enable batch processing
+        'enabled' => true,
+        
+        // Automatically start batch on middleware
+        'auto_start' => true,
+        
+        // Automatically end batch on middleware
+        'auto_end' => true,
+        
+        // Delete activities when a batch is discarded
+        'delete_discarded' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Processors
+    |--------------------------------------------------------------------------
+    |
+    | Configure which processor to use for each model and action combination.
+    | Format: 'Model::class' => ['action' => ProcessorClass::class]
+    |
+    */
+    'processors' => [
+        // Example:
+        // 'App\\Models\\RentRequest' => [
+        //     'updated' => \BIM\ActionLogger\Processors\RentRequestProcessor::class,
+        //     'approved' => \BIM\ActionLogger\Processors\RentRequestProcessor::class,
+        // ],
+    ],
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Default Processors
+    |--------------------------------------------------------------------------
+    |
+    | Fallback processors when no specific processor is found.
+    |
+    */
+    'default_processors' => [
+        'default' => \BIM\ActionLogger\Processors\BatchActionProcessor::class,
+    ],
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Custom Attribute Formatters
+    |--------------------------------------------------------------------------
+    |
+    | Custom formatters for specific attribute types.
+    | Format: 'attribute_name' => FormatterClass::class
+    |
+    */
+    'attribute_formatters' => [
+        // Example:
+        // 'amount' => \App\Formatters\AmountFormatter::class,
+        // 'date' => \App\Formatters\DateFormatter::class,
+    ],
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Translations
+    |--------------------------------------------------------------------------
+    |
+    | Configure how translations are handled.
+    |
+    */
+    'translations' => [
+        // Fallback to validation.attributes for attribute translations
+        'use_validation_attributes' => true,
+        
+        // Translation key prefixes
+        'action_prefix' => 'activity.actions',
+        'model_prefix' => 'models',
+        'attribute_prefix' => 'attributes',
+    ],
 ]; 

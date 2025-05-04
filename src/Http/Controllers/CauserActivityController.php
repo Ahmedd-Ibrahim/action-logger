@@ -5,6 +5,7 @@ namespace BIM\ActionLogger\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use BIM\ActionLogger\Services\ActionLoggerService;
+use BIM\ActionLogger\Resources\ActionLogResource;
 
 class CauserActivityController
 {
@@ -34,8 +35,6 @@ class CauserActivityController
             ], 404);
         }
 
-        $result = $this->actionLogger->processActivities($activities);
-
-        return response()->json($result);
+        return (new ActionLogResource($activities))->response();
     }
 } 

@@ -36,16 +36,14 @@ if (! function_exists('log_action')) {
         array $properties = [],
         ?string $logName = null
     ): void {
-        $logger = action_logger()
-            ->on($subjects)
-            ->by($causer)
-            ->withProperties($properties);
-
-        if ($logName) {
-            $logger->withLogName($logName);
-        }
-
-        $logger->log($action);
+        action_logger()->logAction(
+            $subjects,
+            $action->value(),
+            $action->getTranslationKey(),
+            $causer,
+            $properties,
+            $logName
+        );
     }
 }
 

@@ -4,50 +4,57 @@ namespace BIM\ActionLogger\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
-use Spatie\Activitylog\Facades\LogBatch;
+use Illuminate\Support\Str;
+use BIM\ActionLogger\Facades\ActionLogger;
 
 class AutoBatchLoggingMiddleware
 {
     /**
      * Handle an incoming request.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \Closure  $next
+     * @return mixed
      */
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next)
     {
-        // Check if this route should be excluded
-        if ($this->shouldExcludeRoute($request)) {
+        // Skip if the route is excluded
+        if ($this->shouldSkipRoute($request)) {
             return $next($request);
         }
 
-        // Start a new batch with custom name if configured
-        if (!LogBatch::isOpen()) {
-            $batchName = $this->getBatchName($request);
-            if ($batchName) {
-                LogBatch::setBatch($batchName);
-            } else {
-                LogBatch::startBatch();
-            }
+        // Generate batch ID
+        $batchId = $this->generateBatchId($request);
+        
+        // Get route information for processor selection
+        $routeInfo = $this->getRouteInfo($request);
+        
+        // Start batch logging with route information
+        ActionLogger::startBatch($batchId, $routeInfo);
+        
+        // Process the request
+        $response = $next($request);
+        
+        // End batch logging if auto-end is enabled
+        if ($this->shouldAutoEnd()) {
+            ActionLogger::commitBatch();
         }
-
-        try {
-            $response = $next($request);
-            LogBatch::endBatch();
-            return $response;
-        } catch (\Throwable $e) {
-            LogBatch::endBatch();
-            throw $e;
-        }
+        
+        return $response;
     }
 
     /**
-     * Determine if the route should be excluded from batch logging
+     * Check if the route should be skipped.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return bool
      */
-    protected function shouldExcludeRoute(Request $request): bool
+    protected function shouldSkipRoute(Request $request): bool
     {
         $excludedRoutes = config('action-logger.excluded_routes', []);
         
         foreach ($excludedRoutes as $pattern) {
-            if ($request->is($pattern)) {
+            if (Str::is($pattern, $request->path())) {
                 return true;
             }
         }
@@ -56,16 +63,69 @@ class AutoBatchLoggingMiddleware
     }
 
     /**
-     * Get the batch name for the request
+     * Generate a batch ID for the request.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return string
      */
-    protected function getBatchName(Request $request): ?string
+    protected function generateBatchId(Request $request): string
     {
-        $batchNameResolver = config('action-logger.batch_name_resolver');
+        // Check if a custom resolver is defined
+        $resolver = config('action-logger.batch_name_resolver');
         
-        if ($batchNameResolver && is_callable($batchNameResolver)) {
-            return $batchNameResolver($request);
+        if ($resolver && is_callable($resolver)) {
+            return call_user_func($resolver, $request);
         }
         
-        return null;
+        // Use route name as batch ID if available
+        if ($request->route() && $request->route()->getName()) {
+            return $request->route()->getName() . '_' . time();
+        }
+        
+        // Use method and path as batch ID
+        return strtolower($request->method()) . '_' . str_replace('/', '_', $request->path()) . '_' . time();
+    }
+    
+    /**
+     * Extract route information for processor selection.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return array
+     */
+    protected function getRouteInfo(Request $request): array
+    {
+        $routeInfo = [
+            'method' => $request->method(),
+            'path' => $request->path(),
+            'uri' => $request->route() ? $request->route()->uri() : null,
+        ];
+
+        // Add route name if available
+        if ($request->route() && $request->route()->getName()) {
+            $routeInfo['name'] = $request->route()->getName();
+        }
+        
+        // Add action information if available
+        if ($request->route() && isset($request->route()->getAction()['controller'])) {
+            $controller = $request->route()->getAction()['controller'];
+            // Extract class and method names
+            if (is_string($controller) && str_contains($controller, '@')) {
+                [$class, $method] = explode('@', $controller);
+                $routeInfo['controller'] = $class;
+                $routeInfo['action'] = $method;
+            }
+        }
+        
+        return $routeInfo;
+    }
+
+    /**
+     * Determine if the batch should be automatically ended.
+     *
+     * @return bool
+     */
+    protected function shouldAutoEnd(): bool
+    {
+        return config('action-logger.batch.auto_end', true);
     }
 } 
