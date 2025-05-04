@@ -39,11 +39,11 @@ class ActionLoggerServiceProvider extends ServiceProvider
     {
         $this->publishes([
             __DIR__.'/Config/action-logger.php' => config_path('action-logger.php'),
-        ], 'config');
+        ], ['config', 'action-logger']);
 
         $this->publishes([
-            __DIR__ . '/../resources/lang' => resource_path('lang/vendor/action-logger'),
-        ], 'lang');
+            __DIR__.'/Resources/lang' => resource_path('lang/vendor/action-logger'),
+        ], ['lang', 'action-logger']);
 
         $this->loadTranslationsFrom(__DIR__.'/Resources/lang', 'action-logger');
 

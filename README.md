@@ -21,7 +21,21 @@ composer require bim/action-logger
 After installing, publish the configuration file:
 
 ```bash
-php artisan vendor:publish --provider="BIM\ActionLogger\ActionLoggerServiceProvider"
+php artisan vendor:publish --provider="BIM\ActionLogger\ActionLoggerServiceProvider" --tag="config"
+```
+
+You can also publish the language files:
+
+```bash
+php artisan vendor:publish --provider="BIM\ActionLogger\ActionLoggerServiceProvider" --tag="lang"
+```
+
+This will publish the translation files to your application. The package includes English and Arabic (RTL) languages by default.
+
+Or publish all assets at once:
+
+```bash
+php artisan vendor:publish --provider="BIM\ActionLogger\ActionLoggerServiceProvider" --tag="action-logger"
 ```
 
 ## Configuration
@@ -140,6 +154,30 @@ Route::middleware('auth', \BIM\ActionLogger\Middleware\AutoBatchLoggingMiddlewar
         // Your routes here
     });
 ```
+
+### Controller Registration
+
+As of version 2.0, BIM ActionLogger no longer automatically registers API routes. This gives you more flexibility to register controllers according to your application's needs.
+
+You can register the controllers in your application's route file:
+
+```php
+use BIM\ActionLogger\Http\Controllers\ActionLogController;
+use BIM\ActionLogger\Http\Controllers\CauserActivityController;
+use BIM\ActionLogger\Http\Controllers\ModelActivityController;
+use BIM\ActionLogger\Http\Controllers\RouteActivityController;
+
+// Define your preferred prefix and middleware
+Route::prefix('api/activities')->middleware(['api', 'auth'])->group(function () {
+    // Batch activity logs
+    Route::get('/', [ActionLogController::class, 'index']);
+    Route::get('/{batchUuid}', [ActionLogController::class, 'show']);
+
+    // More routes...
+});
+```
+
+For more details about controller registration, see the [Manual Controller Registration](docs/manual-controller-registration.md) documentation.
 
 ### Manual Batch Control
 
