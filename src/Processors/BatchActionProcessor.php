@@ -122,6 +122,7 @@ class BatchActionProcessor extends BaseActionProcessor implements ActionProcesso
             $entities[] = [
                 'type' => $translatedModelName,
                 'id' => $entity['id'],
+                'action' => $entity['event'],
                 'changes' => $this->simplifyChanges($entity['formatted_changes'] ?? [])
             ];
         }
