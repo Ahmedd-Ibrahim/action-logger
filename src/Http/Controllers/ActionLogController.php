@@ -24,7 +24,7 @@ class ActionLogController
     }
 
     /**
-     * Display a listing of the resource.
+     * Display a listing of the batched activity logs.
      */
     public function index(Request $request): JsonResponse
     {
@@ -58,19 +58,30 @@ class ActionLogController
             $query->whereDate('created_at', '<=', $request->date_to);
         }
 
-        // Get batches
-        $batches = $query->get()
-            ->map(function ($activity) {
-                return $this->actionLogger->getBatchActivities($activity->batch_uuid);
-            });
+        // Paginate batches
+        $perPage = $request->input('per_page', 15);
+        $batchUuids = $query->paginate($perPage);
+        
+        // Get batch activities and process them
+        $processedBatches = collect();
+        foreach($batchUuids->items() as $item) {
+            $activities = $this->actionLogger->getBatchActivities($item->batch_uuid);
+            $processedBatches->push($this->actionLogger->processBatch($activities, $item->batch_uuid));
+        }
 
-        return ActionLogResource::collection($batches)
-            ->additional(['total' => $batches->count()])
-            ->response();
+        return response()->json([
+            'data' => $processedBatches,
+            'meta' => [
+                'current_page' => $batchUuids->currentPage(),
+                'last_page' => $batchUuids->lastPage(),
+                'per_page' => $batchUuids->perPage(),
+                'total' => $batchUuids->total(),
+            ]
+        ]);
     }
 
     /**
-     * Display the specified resource.
+     * Display the specified batch.
      */
     public function show(string $batchUuid): JsonResponse
     {
@@ -82,6 +93,10 @@ class ActionLogController
             ], 404);
         }
 
-        return (new ActionLogResource($activities))->response();
+        $processedBatch = $this->actionLogger->processBatch($activities, $batchUuid);
+        
+        return response()->json([
+            'data' => $processedBatch
+        ]);
     }
 } 
