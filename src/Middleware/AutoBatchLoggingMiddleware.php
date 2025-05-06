@@ -196,43 +196,7 @@ class AutoBatchLoggingMiddleware
     {
         return config('action-logger.batch.auto_end', true);
     }
-    
-    /**
-     * Define tracking-related fields that should be handled by the middleware
-     */
-    protected static array $trackingFields = [
-        'ip', 
-        'user_agent', 
-        'request_method', 
-        'request_url', 
-        'request_data', 
-        'response_data', 
-        'response_status', 
-        'duration_ms', 
-        'server'
-    ];
-    
-    /**
-     * Get the tracking fields that should be processed in the middleware
-     * 
-     * @return array
-     */
-    public static function getTrackingFields(): array
-    {
-        return self::$trackingFields;
-    }
-    
-    /**
-     * Check if a field is considered a tracking field
-     *
-     * @param string $field
-     * @return bool
-     */
-    public static function isTrackingField(string $field): bool
-    {
-        return in_array($field, self::$trackingFields);
-    }
-    
+
     /**
      * Log request data
      * 
@@ -291,24 +255,5 @@ class AutoBatchLoggingMiddleware
         }
         
         return $logger->log($description);
-    }
-    
-    /**
-     * Filter tracking fields from activity properties
-     *
-     * @param array $properties
-     * @return array
-     */
-    public function filterTrackingFields(array $properties): array
-    {
-        $filtered = [];
-        
-        foreach ($properties as $key => $value) {
-            if (!self::isTrackingField($key)) {
-                $filtered[$key] = $value;
-            }
-        }
-        
-        return $filtered;
     }
 } 

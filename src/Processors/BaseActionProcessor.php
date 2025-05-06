@@ -449,9 +449,9 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
      */
     protected function getCauserName($causer): string
     {
-        return method_exists($causer, 'getDisplayName')
-            ? $causer->getDisplayName()
-            : (string) $causer;
+        return $causer instanceof CauserInterface
+            ? $causer->getCauserName()
+            : $causer;
     }
     
     /**
