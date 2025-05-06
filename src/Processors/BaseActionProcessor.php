@@ -463,7 +463,7 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
 
         // Group activities by subject type and ID
         $groupedActivities = $batchActivities->groupBy(function ($activity) {
-            return $activity->subject_type . '|' . $activity->subject_id;
+            return $activity->subject_type . '|' . $activity->subject_id . '|' . $activity->event;
         });
     
         // Process each group of activities for the same entity
@@ -501,9 +501,7 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             }
     
             // Only add the entity if it has changes or if it's a deleted event
-            if (!empty($entityData['changes']) || $entityData['event'] === 'deleted') {
                 $entitiesWithChanges[] = $entityData;
-            }
         }
 
         return $entitiesWithChanges;
