@@ -41,11 +41,6 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
     protected static array $supportedActions = [];
 
     /**
-     * The processor priority
-     */
-    protected static int $priority = 0;
-
-    /**
      * Create a new processor instance
      */
     public function __construct(Collection $activities)
@@ -85,13 +80,6 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
         return in_array($actionType, static::getSupportedActions());
     }
 
-    /**
-     * Get the processor's priority
-     */
-    public static function getPriority(): int
-    {
-        return static::$priority ?? 0;
-    }
 
     /**
      * Process the activities and return the processed data
@@ -126,8 +114,9 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             ];
         }
         
-        // Get the primary activity and common data
         $primaryActivity = $batchActivities->first();
+        
+        // Get the common action from activities
         $commonAction = $this->getCommonAction($batchActivities);
         
         // Extract entities with their changes
@@ -141,8 +130,8 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                 'activity_count' => $batchActivities->count(),
                 'sample_activity' => [
                     'id' => $primaryActivity->id,
-                    'subject_type' => $primaryActivity->subject_type,
-                    'subject_id' => $primaryActivity->subject_id,
+                    'subject_type' => $primaryActivity->subject_type ?? 'null',
+                    'subject_id' => $primaryActivity->subject_id ?? 'null',
                     'event' => $primaryActivity->event,
                     'properties' => $primaryActivity->properties,
                 ]
@@ -159,7 +148,6 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
         // Build simplified entity information
         $entities = [];
         foreach ($entitiesWithChanges as $entity) {
-            // Remove filtering logic - include all entities
             // Get translated model name
             $modelType = $entity['type'];
             $modelBaseName = class_basename($modelType);
@@ -186,6 +174,7 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
             ];
         }
         
+        // Prepare result
         return [
             'batch_uuid' => $batchUuid,
             'message' => $shortMessage,
@@ -476,14 +465,14 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
         $groupedActivities = $batchActivities->groupBy(function ($activity) {
             return $activity->subject_type . '|' . $activity->subject_id;
         });
-
+    
         // Process each group of activities for the same entity
         foreach ($groupedActivities as $entityKey => $activities) {
             [$subjectType, $subjectId] = explode('|', $entityKey);
-
+    
             // Get the most recent activity for basic entity info
             $primaryActivity = $activities->sortByDesc('created_at')->first();
-
+    
             // Initialize entity data
             $entityData = [
                 'type' => $subjectType,
@@ -492,16 +481,16 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                 'changes' => [],
                 'formatted_changes' => []
             ];
-
+    
             // Merge changes from all activities for this entity
             foreach ($activities as $activity) {
                 $changes = $activity->properties['attributes'] ?? [];
                 $old = $activity->properties['old'] ?? [];
-
+    
                 // Merge changes
                 foreach ($changes as $key => $value) {
                     $entityData['changes'][$key] = $value;
-
+    
                     // Add to formatted changes
                     $entityData['formatted_changes'][] = [
                         'attribute' => $this->getAttributeLabel($key),
@@ -510,8 +499,11 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                     ];
                 }
             }
-
-            $entitiesWithChanges[] = $entityData;
+    
+            // Only add the entity if it has changes
+            if (!empty($entityData['changes'])) {
+                $entitiesWithChanges[] = $entityData;
+            }
         }
 
         return $entitiesWithChanges;

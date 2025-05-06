@@ -234,6 +234,11 @@ class ActionLoggerService
             $activities = collect([$activities]);
         }
         
+        // Filter out request_tracking and api_request events as they are handled by the middleware
+        $activities = $activities->filter(function ($activity) {
+            return !in_array($activity->event, ['request_tracking', 'api_request']);
+        });
+        
         // Get the processor for these activities
         $processor = $this->processorFactory->getProcessor($activities);
         
@@ -344,6 +349,7 @@ class ActionLoggerService
 
         $logger->log($description);
     }
+    
 
     /**
      * Get a query builder for activities by subject

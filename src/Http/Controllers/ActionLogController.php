@@ -67,7 +67,7 @@ class ActionLogController
             $activities = $this->actionLogger->getBatchActivities($item->batch_uuid);
             $processedBatches->push($this->actionLogger->processBatch($activities, $item->batch_uuid));
         }
-
+        
         return response()->json([
             'data' => $processedBatches,
             'meta' => [
