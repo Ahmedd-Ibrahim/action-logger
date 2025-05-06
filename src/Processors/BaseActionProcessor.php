@@ -500,8 +500,8 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
                 }
             }
     
-            // Only add the entity if it has changes
-            if (!empty($entityData['changes'])) {
+            // Only add the entity if it has changes or if it's a deleted event
+            if (!empty($entityData['changes']) || $entityData['event'] === 'deleted') {
                 $entitiesWithChanges[] = $entityData;
             }
         }
