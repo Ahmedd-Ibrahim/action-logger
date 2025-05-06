@@ -468,85 +468,53 @@ abstract class BaseActionProcessor implements ActionProcessorInterface
     /**
      * Extract entities with their changes from activities
      */
-    protected function extractEntitiesWithChanges(Collection $activities): array
+    protected function extractEntitiesWithChanges(Collection $batchActivities): array
     {
-        $entities = [];
-        $processedEvents = [];
-        
-        // First pass: collect all entities and their latest activity
-        foreach ($activities as $activity) {
-            if (!isset($activity->subject_type, $activity->subject_id)) {
-                continue;
-            }
+        $entitiesWithChanges = [];
 
-            $entityKey = $activity->subject_type . '_' . $activity->subject_id;
-            
-            // Initialize entity if not exists
-            if (!isset($entities[$entityKey])) {
-                $entities[$entityKey] = [
-                    'type' => $activity->subject_type,
-                    'id' => $activity->subject_id,
-                    'changes' => [],
-                    'formatted_changes' => [],
-                    'event' => $activity->event,
-                    'action' => $activity->event
-                ];
-            }
-            
-            // For priority of actions, prefer these in order: created, deleted, column_updated, updated
-            if ($activity->event === 'created' || 
-                ($activity->event === 'deleted' && $entities[$entityKey]['event'] !== 'created') ||
-                ($activity->event === 'column_updated' && !in_array($entities[$entityKey]['event'], ['created', 'deleted'])) ||
-                ($activity->event === 'updated' && !in_array($entities[$entityKey]['event'], ['created', 'deleted', 'column_updated']))) {
-                $entities[$entityKey]['event'] = $activity->event;
-                $entities[$entityKey]['action'] = $activity->event;
-            }
-            
-            // Track each entity's changes by event
-            $eventKey = $entityKey . '_' . $activity->event;
-            if (!isset($processedEvents[$eventKey])) {
-                $processedEvents[$eventKey] = true;
-                
-                // Extract changes from properties
-                if (isset($activity->properties['attributes'], $activity->properties['old'])) {
-                    $attributes = $activity->properties['attributes'];
-                    $oldAttributes = $activity->properties['old'];
-                    
-                    foreach ($attributes as $key => $newValue) {
-                        $oldValue = $oldAttributes[$key] ?? null;
-                        
-                        // For created events, all attributes should be considered changes
-                        $shouldInclude = $activity->event === 'created' || $oldValue !== $newValue;
-                        
-                        if ($shouldInclude) {
-                            // Get translation key for the attribute
-                            $modelType = $activity->subject_type;
-                            $modelBaseName = class_basename($modelType);
-                            $modelKey = $this->translateModelKey($modelType);
-                            
-                            // Try to get translated attribute label
-                            $attributeLabel = $key;
-                            if (Lang::has("activities.attributes.{$modelKey}.{$key}")) {
-                                $attributeLabel = Lang::get("activities.attributes.{$modelKey}.{$key}");
-                            } elseif (Lang::has("validation.attributes.{$key}")) {
-                                $attributeLabel = Lang::get("validation.attributes.{$key}");
-                            }
-                            
-                            // Format the change
-                            $entities[$entityKey]['formatted_changes'][] = [
-                                'attribute' => $key,
-                                'label' => $attributeLabel,
-                                'old_value' => $this->formatAttributeValue($oldValue),
-                                'new_value' => $this->formatAttributeValue($newValue)
-                            ];
-                        }
-                    }
+        // Group activities by subject type and ID
+        $groupedActivities = $batchActivities->groupBy(function ($activity) {
+            return $activity->subject_type . '|' . $activity->subject_id;
+        });
+
+        // Process each group of activities for the same entity
+        foreach ($groupedActivities as $entityKey => $activities) {
+            [$subjectType, $subjectId] = explode('|', $entityKey);
+
+            // Get the most recent activity for basic entity info
+            $primaryActivity = $activities->sortByDesc('created_at')->first();
+
+            // Initialize entity data
+            $entityData = [
+                'type' => $subjectType,
+                'id' => $subjectId,
+                'event' => $primaryActivity->event,
+                'changes' => [],
+                'formatted_changes' => []
+            ];
+
+            // Merge changes from all activities for this entity
+            foreach ($activities as $activity) {
+                $changes = $activity->properties['attributes'] ?? [];
+                $old = $activity->properties['old'] ?? [];
+
+                // Merge changes
+                foreach ($changes as $key => $value) {
+                    $entityData['changes'][$key] = $value;
+
+                    // Add to formatted changes
+                    $entityData['formatted_changes'][] = [
+                        'attribute' => $this->getAttributeLabel($key),
+                        'old' => $old[$key] ?? null,
+                        'new' => $value
+                    ];
                 }
             }
+
+            $entitiesWithChanges[] = $entityData;
         }
-        
-        // Return all entities, including those without changes
-        return array_values($entities);
+
+        return $entitiesWithChanges;
     }
     
     /**
