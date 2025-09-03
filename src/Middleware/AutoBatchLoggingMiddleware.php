@@ -27,38 +27,38 @@ class AutoBatchLoggingMiddleware
 
         // Start tracking request time
         $startTime = microtime(true);
-        
+
         // Generate batch ID
         $batchId = $this->generateBatchId($request);
-        
+
         // Get route information for processor selection
         $routeInfo = $this->getRouteInfo($request);
-        
-        // Start batch logging with route information
-        ActionLogger::startBatch($batchId, $routeInfo);
-        
+
+        // Start batch logging
+        ActionLogger::startBatch($batchId);
+
         // Process the request
         $response = $next($request);
-        
+
         // Calculate request duration
         $durationMs = (microtime(true) - $startTime) * 1000;
-        
+
         // Get request & response data for tracking
         $requestData = $this->getRequestDataForTracking($request);
         $responseData = $this->getResponseDataForTracking($response);
         $responseStatus = method_exists($response, 'status') ? $response->status() : 200;
-        
+
         // Log request tracking
         $this->logRequestTracking($requestData, $responseData, $responseStatus, $durationMs);
-        
+
         // End batch logging if auto-end is enabled
         if ($this->shouldAutoEnd()) {
             ActionLogger::commitBatch();
         }
-        
+
         return $response;
     }
-    
+
     /**
      * Get request data for tracking.
      *
@@ -67,15 +67,20 @@ class AutoBatchLoggingMiddleware
      */
     protected function getRequestDataForTracking(Request $request): array
     {
-        // Check if the request contains sensitive data
         if ($this->containsSensitiveData($request)) {
             return ['sensitive_data' => true];
         }
-        
-        // Return safe request data
-        return $request->except(['password', 'password_confirmation', 'token']);
+
+        $excludedFields = config('action-logger.excluded_request_fields', ['password', 'password_confirmation', 'token']);
+        $requestData = $request->except($excludedFields);
+
+        if ($this->shouldLogHeaders()) {
+            $requestData['headers'] = $this->getSafeHeaders($request);
+        }
+
+        return $requestData;
     }
-    
+
     /**
      * Check if request contains sensitive data.
      *
@@ -85,16 +90,16 @@ class AutoBatchLoggingMiddleware
     protected function containsSensitiveData(Request $request): bool
     {
         $sensitiveRoutes = config('action-logger.sensitive_routes', []);
-        
+
         foreach ($sensitiveRoutes as $pattern) {
             if (Str::is($pattern, $request->path())) {
                 return true;
             }
         }
-        
+
         return false;
     }
-    
+
     /**
      * Get response data for tracking.
      *
@@ -107,7 +112,7 @@ class AutoBatchLoggingMiddleware
         if (method_exists($response, 'getData')) {
             return $response->getData(true);
         }
-        
+
         return [];
     }
 
@@ -120,13 +125,13 @@ class AutoBatchLoggingMiddleware
     protected function shouldSkipRoute(Request $request): bool
     {
         $excludedRoutes = config('action-logger.excluded_routes', []);
-        
+
         foreach ($excludedRoutes as $pattern) {
             if (Str::is($pattern, $request->path())) {
                 return true;
             }
         }
-        
+
         return false;
     }
 
@@ -140,20 +145,20 @@ class AutoBatchLoggingMiddleware
     {
         // Check if a custom resolver is defined
         $resolver = config('action-logger.batch_name_resolver');
-        
+
         if ($resolver && is_callable($resolver)) {
             return call_user_func($resolver, $request);
         }
-        
+
         // Use route name as batch ID if available
         if ($request->route() && $request->route()->getName()) {
             return $request->route()->getName() . '_' . time();
         }
-        
+
         // Use method and path as batch ID
         return strtolower($request->method()) . '_' . str_replace('/', '_', $request->path()) . '_' . time();
     }
-    
+
     /**
      * Extract route information for processor selection.
      *
@@ -172,7 +177,7 @@ class AutoBatchLoggingMiddleware
         if ($request->route() && $request->route()->getName()) {
             $routeInfo['name'] = $request->route()->getName();
         }
-        
+
         // Add action information if available
         if ($request->route() && isset($request->route()->getAction()['controller'])) {
             $controller = $request->route()->getAction()['controller'];
@@ -183,7 +188,7 @@ class AutoBatchLoggingMiddleware
                 $routeInfo['action'] = $method;
             }
         }
-        
+
         return $routeInfo;
     }
 
@@ -199,9 +204,9 @@ class AutoBatchLoggingMiddleware
 
     /**
      * Log request data
-     * 
+     *
      * This logs basic request information as a regular activity
-     * 
+     *
      * @param array $requestData Request data to track
      * @param array $responseData Response data to track
      * @param int|null $responseStatus HTTP response status
@@ -218,8 +223,8 @@ class AutoBatchLoggingMiddleware
     ): Activity {
         // Get request information
         $request = request();
-        
-        // Prepare properties 
+
+        // Prepare properties
         $properties = [
             'ip' => $request->ip(),
             'user_agent' => $request->userAgent(),
@@ -231,29 +236,76 @@ class AutoBatchLoggingMiddleware
             'duration_ms' => $durationMs,
             'server' => $_SERVER['SERVER_NAME'] ?? null,
         ];
-        
+
         // Determine if we're in a batch
         if (ActionLogger::hasBatch()) {
             $properties['batch_metadata'] = ActionLogger::getBatchMetadata();
         }
-        
+
         // Create activity log
         $logger = \activity()->event('api_request') // Changed from request_tracking to a more descriptive name
             ->by(auth()->user())
             ->withProperties($properties);
-            
+
         if ($logName) {
             $logger->useLog($logName);
         } else {
             $logger->useLog('api_activity');
         }
-        
+
         // Create description
         $description = "HTTP {$request->method()} {$request->path()}";
         if ($responseStatus) {
             $description .= " [Status: {$responseStatus}]";
         }
-        
+
         return $logger->log($description);
     }
-} 
+
+    /**
+     * Check if headers should be logged.
+     *
+     * @return bool
+     */
+    protected function shouldLogHeaders(): bool
+    {
+        return config('action-logger.log_headers', false);
+    }
+
+    /**
+     * Get safe headers for logging (excluding sensitive headers).
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return array
+     */
+    protected function getSafeHeaders(Request $request): array
+    {
+        $sensitiveHeaders = config('action-logger.sensitive_headers', [
+            'authorization',
+            'cookie',
+            'x-api-key',
+            'x-auth-token',
+            'x-csrf-token',
+            'x-session-token',
+        ]);
+
+        $headers = $request->headers->all();
+        $safeHeaders = [];
+
+        foreach ($headers as $name => $values) {
+            $headerName = strtolower($name);
+            if (in_array($headerName, $sensitiveHeaders)) {
+                $safeHeaders[$name] = '[REDACTED]';
+                continue;
+            }
+
+            if (is_array($values) && count($values) === 1) {
+                $safeHeaders[$name] = $values[0];
+            } else {
+                $safeHeaders[$name] = $values;
+            }
+        }
+
+        return $safeHeaders;
+    }
+}

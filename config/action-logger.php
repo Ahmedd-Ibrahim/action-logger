@@ -67,7 +67,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Configure how processors are resolved based on subject type and action.
-    | 
+    |
     | Dynamic processors are automatically resolved using the format:
     | '{model}.{action}' where:
     | - {model} is the snake_case base name of the subject class (e.g., 'rent_request')
@@ -194,6 +194,74 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Log Headers
+    |--------------------------------------------------------------------------
+    |
+    | Whether to log HTTP headers in request tracking.
+    | Set to true to include headers in the logged request data.
+    |
+    */
+    'log_headers' => env('ACTIVITY_LOGGER_LOG_HEADERS', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sensitive Headers
+    |--------------------------------------------------------------------------
+    |
+    | Headers that should be redacted when logging.
+    | These headers will be replaced with '[REDACTED]' in the logs.
+    |
+    */
+    'sensitive_headers' => [
+        'authorization',
+        'cookie',
+        'x-api-key',
+        'x-auth-token',
+        'x-csrf-token',
+        'x-session-token',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sensitive Routes
+    |--------------------------------------------------------------------------
+    |
+    | Routes that contain sensitive data and should not log request data.
+    | When a route matches these patterns, only 'sensitive_data: true' will be logged.
+    |
+    */
+    'sensitive_routes' => [
+        'auth/login',
+        'auth/register',
+        'password/reset',
+        'password/confirm',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Excluded Request Fields
+    |--------------------------------------------------------------------------
+    |
+    | Fields that should be excluded from request data logging.
+    | These fields will be filtered out from the logged request data.
+    |
+    */
+    'excluded_request_fields' => [
+        'password',
+        'password_confirmation',
+        'token',
+        'api_token',
+        'access_token',
+        'refresh_token',
+        'secret',
+        'private_key',
+        'credit_card',
+        'ssn',
+        'social_security_number',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Batch Name Resolver
     |--------------------------------------------------------------------------
     |
@@ -273,13 +341,13 @@ return [
     'batch' => [
         // Enable batch processing
         'enabled' => true,
-        
+
         // Automatically start batch on middleware
         'auto_start' => true,
-        
+
         // Automatically end batch on middleware
         'auto_end' => true,
-        
+
         // Delete activities when a batch is discarded
         'delete_discarded' => false,
     ],
@@ -300,7 +368,7 @@ return [
         //     'approved' => \BIM\ActionLogger\Processors\RentRequestProcessor::class,
         // ],
     ],
-    
+
     /*
     |--------------------------------------------------------------------------
     | Default Processors
@@ -312,7 +380,7 @@ return [
     'default_processors' => [
         'default' => \BIM\ActionLogger\Processors\BatchActionProcessor::class,
     ],
-    
+
     /*
     |--------------------------------------------------------------------------
     | Custom Attribute Formatters
@@ -327,7 +395,7 @@ return [
         // 'amount' => \App\Formatters\AmountFormatter::class,
         // 'date' => \App\Formatters\DateFormatter::class,
     ],
-    
+
     /*
     |--------------------------------------------------------------------------
     | Translations
@@ -339,10 +407,10 @@ return [
     'translations' => [
         // Fallback to validation.attributes for attribute translations
         'use_validation_attributes' => true,
-        
+
         // Translation key prefixes
         'action_prefix' => 'activity.actions',
         'model_prefix' => 'models',
         'attribute_prefix' => 'attributes',
     ],
-]; 
+];
