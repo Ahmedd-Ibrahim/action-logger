@@ -201,7 +201,7 @@ return [
     | Set to true to include headers in the logged request data.
     |
     */
-    'log_headers' => env('ACTIVITY_LOGGER_LOG_HEADERS', false),
+    'log_headers' => env('ACTIVITY_LOGGER_LOG_HEADERS', true),
 
     /*
     |--------------------------------------------------------------------------
